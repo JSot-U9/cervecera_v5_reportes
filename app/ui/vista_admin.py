@@ -2,8 +2,9 @@
 vista_admin.py
 ===============
 Solo el rol ADMIN ve este módulo (ver MODULOS_POR_ROL en seguridad.py).
-Permite crear usuarios nuevos, desactivar/reactivar usuarios, y revisar
-el historial de inicios de sesión (registros de acceso al sistema).
+Permite crear usuarios nuevos, desactivar/reactivar usuarios, revisar
+el historial de inicios de sesión, y configurar los datos de la empresa
+que aparecen en los reportes.
 """
 
 import tkinter as tk
@@ -14,7 +15,9 @@ from app.modelos import LogAcceso, Usuario
 from app.logica_autenticacion import (
     listar_usuarios, crear_usuario, desactivar_usuario, reactivar_usuario, ErrorAutenticacion,
 )
+from app.logica_configuracion import obtener_datos_empresa, guardar_datos_empresa
 from app.ui.widgets import EncabezadoModulo, BarraBusqueda, TablaDatos, ajustar_ventana_a_contenido
+from app.ui.estilos import COLOR_TEXTO_SECUNDARIO, COLOR_FONDO
 
 ROLES_DISPONIBLES = ["ADMIN", "COMPRAS", "INVENTARIO", "PRODUCCION", "VENTAS", "COSTOS"]
 
@@ -25,13 +28,14 @@ class VistaAdmin(ttk.Frame):
         EncabezadoModulo(
             self,
             "Administración del Sistema",
-            "Gestión de cuentas de usuario y registro de accesos al sistema",
+            "Usuarios, registros de acceso y configuración de la empresa",
         ).pack(fill="x")
 
         notebook = ttk.Notebook(self)
         notebook.pack(fill="both", expand=True, padx=12, pady=8)
 
         self._pestana_usuarios(notebook)
+        self._pestana_empresa(notebook)
         self._pestana_logs(notebook)
 
         self.refrescar()
@@ -54,6 +58,81 @@ class VistaAdmin(ttk.Frame):
             ["Nombre de Usuario (login)", "Nombre Completo", "Rol Asignado", "Estado de la Cuenta"],
         )
         self.tabla_usuarios.empaquetar()
+
+    def _pestana_empresa(self, notebook):
+        """
+        Pestaña para editar los datos de la empresa que aparecen en
+        todos los reportes (nombre, RUC, dirección, contacto, etc.).
+
+        Los datos se leen y guardan en la tabla ParametroSistema usando
+        las funciones de logica_configuracion.py.
+        """
+        pestana = ttk.Frame(notebook, padding=20)
+        notebook.add(pestana, text="Empresa")
+
+        nota = ttk.Label(
+            pestana,
+            text="Estos datos aparecen en el encabezado de todos los reportes (PDF, Excel, CSV).",
+            foreground=COLOR_TEXTO_SECUNDARIO,
+            font=("Segoe UI", 9, "italic"),
+        )
+        nota.grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 16))
+
+        campos = [
+            ("empresa_nombre",    "Nombre de la empresa:"),
+            ("empresa_ruc",       "RUC / Nº de identificación fiscal:"),
+            ("empresa_direccion", "Dirección:"),
+            ("empresa_ciudad",    "Ciudad y País:"),
+            ("empresa_telefono",  "Teléfono:"),
+            ("empresa_email",     "Correo electrónico:"),
+            ("empresa_web",       "Sitio web (opcional):"),
+        ]
+        self._vars_empresa = {}
+
+        for fila, (clave, etiqueta) in enumerate(campos, start=1):
+            ttk.Label(pestana, text=etiqueta, font=("Segoe UI", 9, "bold")).grid(
+                row=fila, column=0, sticky="w", padx=(0, 12), pady=4,
+            )
+            var = tk.StringVar()
+            ttk.Entry(pestana, textvariable=var, width=48).grid(
+                row=fila, column=1, sticky="ew", pady=4,
+            )
+            self._vars_empresa[clave] = var
+
+        pestana.columnconfigure(1, weight=1)
+
+        ttk.Button(
+            pestana, text="💾  Guardar datos de la empresa",
+            command=self._guardar_empresa,
+        ).grid(row=len(campos) + 1, column=0, columnspan=2, sticky="w", pady=(18, 0))
+
+        self._cargar_datos_empresa()
+
+    def _cargar_datos_empresa(self):
+        """Carga los valores actuales de la BD en los campos del formulario."""
+        emp = obtener_datos_empresa()
+        for clave, var in self._vars_empresa.items():
+            var.set(emp.get(clave, ""))
+
+    def _guardar_empresa(self):
+        vals = {clave: var.get().strip() for clave, var in self._vars_empresa.items()}
+        if not vals["empresa_nombre"]:
+            messagebox.showwarning("Aviso", "El nombre de la empresa no puede estar vacío.")
+            return
+        guardar_datos_empresa(
+            nombre    = vals["empresa_nombre"],
+            ruc       = vals["empresa_ruc"],
+            direccion = vals["empresa_direccion"],
+            telefono  = vals["empresa_telefono"],
+            email     = vals["empresa_email"],
+            ciudad    = vals["empresa_ciudad"],
+            web       = vals["empresa_web"],
+        )
+        messagebox.showinfo(
+            "Guardado",
+            "Los datos de la empresa fueron guardados.\n"
+            "El nuevo encabezado aparecerá en el próximo reporte que generes.",
+        )
 
     def _pestana_logs(self, notebook):
         pestana = ttk.Frame(notebook, padding=8)

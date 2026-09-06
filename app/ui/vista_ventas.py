@@ -46,6 +46,7 @@ class VistaVentas(ttk.Frame):
         barra = BarraBusqueda(pestana, al_escribir=lambda t: self.tabla_ventas.filtrar(t))
         if puede_crear:
             barra.agregar_boton("+ Nueva venta", self._abrir_nueva_venta)
+        barra.agregar_boton("📊  Generar reporte…", self._abrir_dialogo_reporte)
         barra.pack(fill="x", pady=(0, 8))
 
         contenedor = ttk.Frame(pestana)
@@ -93,6 +94,10 @@ class VistaVentas(ttk.Frame):
     def _abrir_nuevo_cliente(self):
         VentanaCliente(self, al_guardar=self.refrescar)
 
+
+    def _abrir_dialogo_reporte(self):
+        from app.ui.dialogo_reporte import DialogoReporte
+        DialogoReporte(self.winfo_toplevel(), modulo="ventas")
 
 class VentanaCliente(tk.Toplevel):
     def __init__(self, parent, al_guardar):

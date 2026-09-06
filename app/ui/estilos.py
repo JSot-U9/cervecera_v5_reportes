@@ -21,9 +21,33 @@ usarlo en un botón, se escribe:
 
 Este archivo define los estilos, pero es cada pantalla (en la carpeta
 app/ui/) la que decide cuándo usarlos.
+
+Motor de tema — ttkbootstrap
+-----------------------------
+Antes se usaba el tema base "clam" de ttk (plano, pero de aspecto
+anticuado: sin bordes redondeados, sin estados hover suaves, iconos
+de flecha/checkbox muy básicos). Ahora se usa **ttkbootstrap**, que
+reemplaza solo esa capa de "tema base": todos los estilos con nombre
+de este archivo (Sidebar.TButton, Tarjeta.TFrame, TarjetaValor.TLabel,
+etc.) se siguen definiendo exactamente igual con
+``ttk.Style().configure(...)`` — ttkbootstrap.Style es 100% compatible
+con ttk.Style, solo agrega temas nuevos y widgets propios (Meter,
+DateEntry, Tooltip...) que este proyecto no usa todavía.
+
+Detalle importante de ttkbootstrap: su clase Style es un "singleton"
+pensado para una sola ventana raíz (tk.Tk) por proceso. Esta app crea
+DOS raíces tk.Tk() sucesivas (VentanaLogin y, después, VentanaPrincipal),
+así que aplicar_estilos() resetea el singleton en cada llamada — ver
+el comentario dentro de la función.
 """
 
-from tkinter import ttk
+import ttkbootstrap as tb
+
+# Tema base de ttkbootstrap. "flatly" es un tema claro, neutro y
+# moderno que combina bien con la paleta cálida (ámbar/verde lúpulo)
+# definida más abajo, ya que casi todos los widgets tienen un estilo
+# con nombre propio que sobrescribe sus colores por defecto.
+TEMA_TTKBOOTSTRAP = "flatly"
 
 # ══════════════════════════════════════════════════════════════════
 #  1) PALETA DE COLORES
@@ -59,7 +83,8 @@ COLOR_ADVERTENCIA = "#C9922D"        # dorado — advertencias intermedias
 _COLOR_SECUNDARIO = "#E9D9B9"        # Sepia muy claro — botón secundario
 _COLOR_SECUNDARIO_HOVER = "#DEC79A"  # Sepia claro — botón secundario al pasar el mouse
 _COLOR_DISABLED = "#E6DAC0"          # botones deshabilitados
-_COLOR_SEPARADOR = "#E5D6B3"         # líneas separadoras
+_COLOR_SEPARADOR = "#E5D6B3"         # líneas separadoras (actualmente sin
+                                      # usar — ver nota de TSeparator más abajo)
 
 
 def aplicar_estilos(ventana):
@@ -74,10 +99,16 @@ def aplicar_estilos(ventana):
     """
     ventana.configure(bg=COLOR_FONDO)
 
-    estilo = ttk.Style(ventana)
-    # "clam" es el único tema base de ttk que permite personalizar
-    # colores de fondo con libertad en todas las plataformas.
-    estilo.theme_use("clam")
+    # ttkbootstrap.Style es un singleton ligado a la ventana raíz que
+    # existía cuando se creó. Como esta app abre una raíz tk.Tk() nueva
+    # para el login y luego OTRA para la ventana principal (la anterior
+    # ya fue destruida), hay que soltar la instancia vieja antes de
+    # pedir una nueva — si no, ttkbootstrap intentaría seguir hablando
+    # con una ventana que ya no existe. Los diálogos (Toplevel) que se
+    # abren DESDE una de estas dos raíces no necesitan esto: heredan el
+    # estilo de su propia raíz sin volver a llamar aplicar_estilos().
+    tb.Style.instance = None
+    estilo = tb.Style(theme=TEMA_TTKBOOTSTRAP)
 
     # ── Widgets genéricos (los que no llevan un style con nombre) ──
     estilo.configure("TFrame", background=COLOR_FONDO)
@@ -141,11 +172,12 @@ def aplicar_estilos(ventana):
                       foreground=COLOR_TEXTO_SECUNDARIO, font=("Segoe UI", 9))
 
     # ── Pestañas (Notebook) ──────────────────────────────────────────
-    # Nota: por defecto, el tema "clam" dibuja la pestaña NO seleccionada
-    # más alta que la seleccionada (el borde inferior de la seleccionada
-    # se "hunde" para unirse visualmente con el contenido). Eso confunde
-    # al usuario, porque parece que la pestaña activa es la más chica.
-    # Para evitarlo, forzamos explícitamente que la pestaña seleccionada
+    # Nota: en varios temas base de ttk (incluido "clam") la pestaña NO
+    # seleccionada se dibuja más alta que la seleccionada (el borde
+    # inferior de la seleccionada se "hunde" para unirse visualmente
+    # con el contenido). Eso confunde al usuario, porque parece que la
+    # pestaña activa es la más chica. Para evitarlo, forzamos
+    # explícitamente que la pestaña seleccionada
     # tenga MÁS padding vertical que las demás, así siempre se ve más
     # grande — reforzando que esa es la pestaña activa.
     estilo.configure("TNotebook", background=COLOR_FONDO, borderwidth=0)
@@ -166,8 +198,20 @@ def aplicar_estilos(ventana):
     estilo.map("Treeview", background=[("selected", COLOR_PRIMARIO_CLARO)],
                foreground=[("selected", COLOR_TEXTO)])
 
-    estilo.configure("TScrollbar", background=COLOR_PRIMARIO_CLARO)
-    estilo.configure("TSeparator", background=_COLOR_SEPARADOR)
+    # ── Scrollbar y separador ─────────────────────────────────────────
+    # OJO: a diferencia de los estilos de arriba, "TScrollbar" y
+    # "TSeparator" son nombres de estilo "base" (sin prefijo con
+    # nombre propio, como "Sidebar.TButton"). Cuando ttkbootstrap ve
+    # un .configure() sobre uno de esos nombres base con un color que
+    # no reconoce como palabra clave suya (ej. un hex crudo), intenta
+    # generar sobre la marcha los elementos gráficos del widget — y en
+    # varias combinaciones de Tk/Tcl en Linux eso revienta con un
+    # error "Duplicate element" al crear el Scrollbar. Por eso NO se
+    # sobrescriben aquí: se deja que el tema "flatly" les ponga su
+    # propio color por defecto (ya se ve bien y combina con el resto).
+    # Si en algún momento quieres un color propio, hazlo con la sintaxis
+    # de ttkbootstrap (ej. style="secondary.Vertical.TScrollbar" al
+    # crear el widget) en vez de sobrescribir el nombre base aquí.
 
     _habilitar_seleccionar_todo(ventana)
 

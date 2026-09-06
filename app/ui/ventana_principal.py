@@ -20,6 +20,7 @@ from tkinter import ttk
 from app.sesion import sesion_actual
 from app.seguridad import modulos_visibles
 from app.logica_autenticacion import cerrar_sesion
+from app.logica_configuracion import obtener_parametro
 from app.ui.estilos import aplicar_estilos
 from app.ui.logo import cargar_logo
 
@@ -46,8 +47,17 @@ DEFINICION_MODULOS = [
 class VentanaPrincipal(tk.Tk):
     def __init__(self):
         super().__init__()
+
+        # Nombre de la empresa viene de la base de datos, no hardcodeado.
+        # Si el admin cambia el nombre desde la pestaña Empresa, el título
+        # se actualizará la próxima vez que se inicie sesión.
+        self._nombre_empresa = obtener_parametro(
+            "empresa_nombre", "Sistema de Gestión"
+        )
+
         self.title(
-            f"Cervecería del Valle Sagrado  —  {sesion_actual.nombre_completo} [{sesion_actual.rol}]"
+            f"{self._nombre_empresa}  —  "
+            f"{sesion_actual.nombre_completo} [{sesion_actual.rol}]"
         )
         self.geometry("1200x720")
         self.minsize(980, 620)
@@ -76,10 +86,22 @@ class VentanaPrincipal(tk.Tk):
         menu.pack_propagate(False)
 
         tarjeta_logo = ttk.Frame(menu, style="Tarjeta.TFrame", padding=8)
-        tarjeta_logo.pack(pady=(0, 10))
+        tarjeta_logo.pack(pady=(0, 6))
         self._imagen_logo_sidebar = cargar_logo(self, tamano="chico")
         ttk.Label(tarjeta_logo, image=self._imagen_logo_sidebar,
                   style="Tarjeta.TLabel").pack()
+
+        # Nombre de la empresa bajo el logo, en el propio sidebar (sin tarjeta).
+        # wraplength=180 evita que un nombre largo desborde el panel lateral.
+        ttk.Label(
+            menu,
+            text=self._nombre_empresa,
+            style="SidebarTitulo.TLabel",
+            font=("Segoe UI", 9, "bold"),
+            wraplength=180,
+            justify="center",
+            anchor="center",
+        ).pack(pady=(0, 10), padx=6)
 
         for clave, texto, _clase in DEFINICION_MODULOS:
             if clave not in self._modulos_permitidos:

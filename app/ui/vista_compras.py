@@ -50,6 +50,7 @@ class VistaCompras(ttk.Frame):
         barra = BarraBusqueda(pestana, al_escribir=lambda t: self.tabla_ordenes.filtrar(t))
         if puede_crear:
             barra.agregar_boton("+ Nueva orden de compra", self._abrir_nueva_orden)
+        barra.agregar_boton("📊  Generar reporte…", self._abrir_dialogo_reporte)
         barra.pack(fill="x", pady=(0, 8))
 
         contenedor_tabla = ttk.Frame(pestana)
@@ -118,6 +119,10 @@ class VistaCompras(ttk.Frame):
                      "email": p.email or ""}
         VentanaProveedor(self, al_guardar=self.refrescar, proveedor_id=proveedor_id, datos=datos)
 
+
+    def _abrir_dialogo_reporte(self):
+        from app.ui.dialogo_reporte import DialogoReporte
+        DialogoReporte(self.winfo_toplevel(), modulo="compras")
 
 class VentanaProveedor(tk.Toplevel):
     """Formulario para crear o editar un proveedor."""

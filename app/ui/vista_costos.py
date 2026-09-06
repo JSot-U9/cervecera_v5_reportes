@@ -89,4 +89,4 @@ class VistaCostos(ttk.Frame):
 
     def _abrir_dialogo_reporte(self):
         from app.ui.dialogo_reporte import DialogoReporte
-        DialogoReporte(self.winfo_toplevel())
+        DialogoReporte(self.winfo_toplevel(), modulo="costos")

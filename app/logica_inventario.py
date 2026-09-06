@@ -2,7 +2,7 @@
 logica_inventario.py
 =====================
 Todo lo relacionado a lotes, movimientos y la regla FIFO
-("First Expired, First Out" / "el lote más antiguo sale primero").
+("First In, First Out" / "el lote más antiguo sale primero").
 
 Idea clave del FIFO: cuando hay que sacar cantidad de un producto
 (para venderlo o para usarlo en producción), primero se agota el

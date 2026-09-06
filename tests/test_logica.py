@@ -1,668 +1,716 @@
 """
-datos_iniciales.py
-===================
-Carga datos de ejemplo la PRIMERA vez que se ejecuta el programa.
-Si ya existen usuarios en la base de datos, esta función no hace nada.
+test_logica.py
+==============
+Pruebas automáticas de la lógica de negocio.
 
-Tablas pobladas (ahora con al menos 20 filas cada una):
-  - Usuario            → 20
-  - Proveedor          → 20
-  - Producto           → 30 (20 insumos + 10 terminados)
-  - Cliente            → 20
-  - Receta             → 20
-  - IngredienteReceta  → > 20
-  - OrdenCompra / Lote / Movimiento  → 20 órdenes de compra
-  - OrdenProduccion / CostoProduccion → 25 órdenes (20 cerradas, 3 en proceso, 2 iniciadas)
-  - OrdenVenta / DetalleVenta         → 20 ventas
+Ejecutar con:
+    pytest
+
+Qué se prueba aquí (y qué NO):
+  ✅  Seguridad       — hash y verificación de contraseñas
+  ✅  Autenticación   — login correcto, contraseña mal, usuario inactivo
+  ✅  Inventario      — crear lotes, FIFO, stock insuficiente, ajustes
+  ✅  Compras         — registrar orden, numeración correlativa, stock
+  ✅  Ventas          — registrar venta, descuento de stock, stock insuficiente
+  ✅  Producción      — ciclo completo, cálculo de costos, errores de estado
+  ❌  Interfaz gráfica — difícil de probar de forma automática (ver GUIA_ARQUITECTURA.md)
+
+Base de datos de prueba:
+  Los tests usan una base de datos SQLite EN MEMORIA, completamente separada
+  del archivo cervecera.db. Cada test arranca con tablas vacías y limpias
+  (el fixture 'base_de_datos_limpia' se encarga de esto).
+
+  IMPORTANTE: el parche del motor de base de datos (las tres líneas al principio
+  de este módulo, antes de los imports de la app) debe hacerse ANTES de importar
+  cualquier módulo de lógica, porque esos módulos llaman a nueva_sesion() en
+  tiempo de ejecución y la función busca SesionLocal en el espacio de nombres
+  de app.basedatos. Si se parchea antes, todos los tests usan la BD en memoria.
 """
 
-from app.basedatos import nueva_sesion
+# ── Parche del motor ANTES de importar cualquier módulo de la app ──────────
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+import app.basedatos as _bd
+
+_TEST_ENGINE = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
+_bd.engine       = _TEST_ENGINE
+_bd.SesionLocal  = sessionmaker(bind=_TEST_ENGINE, expire_on_commit=False)
+# ───────────────────────────────────────────────────────────────────────────
+
+import pytest
+from datetime import date, timedelta
+
+from app.basedatos import Base, nueva_sesion
 from app.modelos import (
-    Usuario, Proveedor, Producto, Cliente, Receta, IngredienteReceta,
+    Usuario, Proveedor, Producto, Cliente,
+    Receta, IngredienteReceta, LoteInventario, CostoProduccion,
 )
-from app.seguridad import hash_contrasena
-from app.logica_configuracion import establecer_parametro
+from app.seguridad import hash_contrasena, verificar_contrasena
+from app.logica_autenticacion import (
+    iniciar_sesion, ErrorAutenticacion, crear_usuario,
+    desactivar_usuario, reactivar_usuario,
+)
+from app.logica_inventario import (
+    crear_lote, stock_total, consumir_fifo, StockInsuficiente,
+    ajustar_stock, productos_bajo_minimo, lotes_proximos_a_vencer,
+)
 from app.logica_compras import registrar_compra
-from app.logica_produccion import crear_orden, iniciar_proceso, cerrar_orden
 from app.logica_ventas import registrar_venta
+from app.logica_produccion import crear_orden, iniciar_proceso, cerrar_orden
+from app.sesion import sesion_actual
 
 
-def cargar_datos_iniciales():
-    with nueva_sesion() as db:
-        if db.query(Usuario).count() > 0:
-            return  # ya inicializado
+# ══════════════════════════════════════════════════════════════════
+#  FIXTURES
+# ══════════════════════════════════════════════════════════════════
 
-        # ══════════════════════════════════════════════════════════
-        # USUARIOS (20 — uno por rol más extras)
-        # ══════════════════════════════════════════════════════════
-        usuarios_iniciales = [
-            Usuario(usuario="admin",      nombre_completo="Administrador del Sistema",
-                    rol="ADMIN",      contrasena_hash=hash_contrasena("admin123")),
-            Usuario(usuario="compras",    nombre_completo="Jefa de Compras — Lucía Quispe",
-                    rol="COMPRAS",    contrasena_hash=hash_contrasena("compras123")),
-            Usuario(usuario="inventario", nombre_completo="Almacenero — Marco Condori",
-                    rol="INVENTARIO", contrasena_hash=hash_contrasena("inv123")),
-            Usuario(usuario="produccion", nombre_completo="Maestro Cervecero — Renzo Mamani",
-                    rol="PRODUCCION", contrasena_hash=hash_contrasena("prod123")),
-            Usuario(usuario="ventas",     nombre_completo="Vendedora — Sofía Tupac",
-                    rol="VENTAS",     contrasena_hash=hash_contrasena("ventas123")),
-            Usuario(usuario="costos",     nombre_completo="Contador — Adrián Flores",
-                    rol="COSTOS",     contrasena_hash=hash_contrasena("costos123")),
-        ]
+@pytest.fixture(autouse=True)
+def base_de_datos_limpia():
+    """
+    Crea todas las tablas ANTES de cada test y las elimina AL TERMINAR.
+    Al ser autouse=True, se aplica automáticamente a todos los tests
+    sin necesidad de declararlo explícitamente.
+    """
+    import app.modelos  # noqa: F401 — necesario para registrar los modelos en Base
+    Base.metadata.create_all(_TEST_ENGINE)
+    yield
+    sesion_actual.cerrar()          # por si algún test dejó sesión abierta
+    Base.metadata.drop_all(_TEST_ENGINE)
 
-        # Añadir 14 usuarios adicionales con roles variados
-        roles_extra = ["ADMIN", "COMPRAS", "INVENTARIO", "PRODUCCION", "VENTAS", "COSTOS"]
-        for i in range(7, 21):  # del 7 al 20
-            rol = roles_extra[i % len(roles_extra)]
-            usuarios_iniciales.append(
-                Usuario(
-                    usuario=f"usuario{i}",
-                    nombre_completo=f"Usuario de Prueba {i}",
-                    rol=rol,
-                    contrasena_hash=hash_contrasena(f"pass{i}123")
-                )
-            )
-        db.add_all(usuarios_iniciales)
 
-        # ══════════════════════════════════════════════════════════
-        # PROVEEDORES (20)
-        # ══════════════════════════════════════════════════════════
-        proveedores = [
-            Proveedor(razon_social="Maltas del Sur S.A.C.",
-                      ruc="20123456789", contacto="Juan Quispe",
-                      telefono="984000001", email="maltas@maldelsur.pe"),
-            Proveedor(razon_social="Lúpulos Andinos E.I.R.L.",
-                      ruc="20987654321", contacto="María Flores",
-                      telefono="984000002", email="ventas@lupulosandinos.pe"),
-            Proveedor(razon_social="Apícola Sagrado Valle S.A.C.",
-                      ruc="20456789123", contacto="Rosa Huamán",
-                      telefono="984000003", email="apicola@sagradovalle.pe"),
-            Proveedor(razon_social="Envases y Etiquetas Cusco E.I.R.L.",
-                      ruc="20789123456", contacto="Luis Mamani",
-                      telefono="984000004", email="ventas@envases-cusco.pe"),
-            Proveedor(razon_social="Granos Andinos S.A.C.",
-                      ruc="20321456987", contacto="Carlos Vargas",
-                      telefono="984000005", email="granos@granosandinos.pe"),
-            Proveedor(razon_social="Química y Aditivos del Sur E.I.R.L.",
-                      ruc="20654987321", contacto="Ana Ccoa",
-                      telefono="984000006", email="ventas@quimicasur.pe"),
-            Proveedor(razon_social="Agua Pura Andina S.A.C.",
-                      ruc="20147258369", contacto="Roberto Huanca",
-                      telefono="984000007", email="agua@aguaandina.pe"),
-            Proveedor(razon_social="Materiales e Insumos Cusco S.R.L.",
-                      ruc="20369258147", contacto="Patricia Quispe",
-                      telefono="984000008", email="ventas@maticusco.pe"),
-        ]
+@pytest.fixture
+def db():
+    """Sesión de base de datos para usar directamente en los tests."""
+    s = nueva_sesion()
+    yield s
+    s.close()
 
-        # Añadir 12 proveedores adicionales
-        for i in range(9, 21):
-            proveedores.append(
-                Proveedor(
-                    razon_social=f"Proveedor Extra {i} S.A.C.",
-                    ruc=f"20{i:09d}",  # RUC de 11 dígitos
-                    contacto=f"Contacto {i}",
-                    telefono=f"984000{i:03d}",
-                    email=f"proveedor{i}@extra.pe"
-                )
-            )
-        db.add_all(proveedores)
 
-        # ══════════════════════════════════════════════════════════
-        # PRODUCTOS INSUMOS (20)
-        # ══════════════════════════════════════════════════════════
-        insumos = [
-            Producto(codigo="INS-001", nombre="Malta de cebada base",
-                     tipo="Insumo", unidad_medida="kg", stock_minimo=50),
-            Producto(codigo="INS-002", nombre="Lúpulo Cascade (amargor y aroma)",
-                     tipo="Insumo", unidad_medida="kg", stock_minimo=5),
-            Producto(codigo="INS-003", nombre="Levadura Safale S-04 (fermentación alta)",
-                     tipo="Insumo", unidad_medida="g",  stock_minimo=500),
-            Producto(codigo="INS-004", nombre="Cáscara de naranja deshidratada",
-                     tipo="Insumo", unidad_medida="kg", stock_minimo=3),
-            Producto(codigo="INS-005", nombre="Miel de abeja pura (flora andina)",
-                     tipo="Insumo", unidad_medida="kg", stock_minimo=10),
-            Producto(codigo="INS-006", nombre="Malta de trigo (cerveza de trigo)",
-                     tipo="Insumo", unidad_medida="kg", stock_minimo=20),
-            Producto(codigo="INS-007", nombre="Lúpulo Chinook (resina y pino)",
-                     tipo="Insumo", unidad_medida="kg", stock_minimo=3),
-            Producto(codigo="INS-008", nombre="Azúcar morena de caña",
-                     tipo="Insumo", unidad_medida="kg", stock_minimo=10),
-            Producto(codigo="INS-009", nombre="Cacao en polvo sin azúcar",
-                     tipo="Insumo", unidad_medida="kg", stock_minimo=5),
-            Producto(codigo="INS-010", nombre="Canela molida de Cusco",
-                     tipo="Insumo", unidad_medida="kg", stock_minimo=1),
-            Producto(codigo="INS-011", nombre="Maíz morado deshidratado (chicha morada)",
-                     tipo="Insumo", unidad_medida="kg", stock_minimo=8),
-            Producto(codigo="INS-012", nombre="Quinua tostada andina",
-                     tipo="Insumo", unidad_medida="kg", stock_minimo=5),
-            Producto(codigo="INS-013", nombre="Levadura Lallemand Abbaye (estilo belga)",
-                     tipo="Insumo", unidad_medida="g",  stock_minimo=300),
-        ]
+@pytest.fixture
+def usuario_admin(db):
+    u = Usuario(
+        usuario="admin_test",
+        nombre_completo="Admin de Prueba",
+        rol="ADMIN",
+        contrasena_hash=hash_contrasena("clave123"),
+        activo=True,
+    )
+    db.add(u)
+    db.commit()
+    db.refresh(u)
+    return u
 
-        # Añadir 7 insumos adicionales (INS-014 a INS-020)
-        nombres_insumos_extra = [
-            "Avena en hojuelas", "Café tostado molido", "Vainilla en rama",
-            "Jengibre fresco", "Clavo de olor", "Pimienta de Jamaica", "Flor de Jamaica"
-        ]
-        for i, nombre in enumerate(nombres_insumos_extra, start=14):
-            insumos.append(
-                Producto(
-                    codigo=f"INS-{i:03d}",
-                    nombre=nombre,
-                    tipo="Insumo",
-                    unidad_medida="kg",
-                    stock_minimo=2
-                )
-            )
 
-        # ══════════════════════════════════════════════════════════
-        # PRODUCTOS TERMINADOS (10)
-        # ══════════════════════════════════════════════════════════
-        terminados = [
-            Producto(codigo="PRD-001", nombre="Anka Chida",
-                     descripcion="Cerveza artesanal ámbar estilo American Amber Ale.",
-                     tipo="Producto terminado", unidad_medida="L",
-                     precio_venta=45.0, stock_minimo=20),
-            Producto(codigo="PRD-002", nombre="Killa Negra",
-                     descripcion="Cerveza artesanal tipo Stout con miel andina.",
-                     tipo="Producto terminado", unidad_medida="L",
-                     precio_venta=52.0, stock_minimo=15),
-            Producto(codigo="PRD-003", nombre="Inti IPA",
-                     descripcion="India Pale Ale con notas cítricas de naranja andina.",
-                     tipo="Producto terminado", unidad_medida="L",
-                     precio_venta=48.0, stock_minimo=15),
-            Producto(codigo="PRD-004", nombre="Cusqueña Dorada (Weizen)",
-                     descripcion="Cerveza de trigo estilo Weizen, ligera y refrescante.",
-                     tipo="Producto terminado", unidad_medida="L",
-                     precio_venta=42.0, stock_minimo=20),
-            Producto(codigo="PRD-005", nombre="Pachamamita Oscura",
-                     descripcion="Porter oscura con cacao y canela de Cusco.",
-                     tipo="Producto terminado", unidad_medida="L",
-                     precio_venta=55.0, stock_minimo=10),
-        ]
+@pytest.fixture
+def proveedor(db):
+    p = Proveedor(razon_social="Proveedor Test S.A.C.", ruc="20999999999", activo=True)
+    db.add(p)
+    db.commit()
+    db.refresh(p)
+    return p
 
-        # Añadir 5 productos terminados adicionales (PRD-006 a PRD-010)
-        terminados_extra = [
-            ("PRD-006", "Chicha Morada Cerveza", "Cerveza artesanal con maíz morado.", 40.0, 10),
-            ("PRD-007", "Café Porter", "Porter con café tostado.", 58.0, 8),
-            ("PRD-008", "Jengibre Ale", "Ale especiada con jengibre.", 46.0, 12),
-            ("PRD-009", "Hibiscus Sour", "Sour con flor de jamaica.", 49.0, 10),
-            ("PRD-010", "Vainilla Stout", "Stout con vainilla.", 60.0, 8),
-        ]
-        for codigo, nombre, desc, precio, stock_min in terminados_extra:
-            terminados.append(
-                Producto(
-                    codigo=codigo, nombre=nombre, descripcion=desc,
-                    tipo="Producto terminado", unidad_medida="L",
-                    precio_venta=precio, stock_minimo=stock_min
-                )
-            )
 
-        db.add_all(insumos + terminados)
-        db.flush()
+@pytest.fixture
+def insumo(db):
+    p = Producto(
+        codigo="INS-T01", nombre="Malta Test",
+        tipo="Insumo", unidad_medida="kg", stock_minimo=10.0, activo=True,
+    )
+    db.add(p)
+    db.commit()
+    db.refresh(p)
+    return p
 
-        # ══════════════════════════════════════════════════════════
-        # CLIENTES (20)
-        # ══════════════════════════════════════════════════════════
-        clientes = [
-            Cliente(tipo="NATURAL",  nombre="Pedro Condori Mamani",
-                    documento="12345678",    telefono="984111001"),
-            Cliente(tipo="JURIDICA", nombre="Distribuidora Qosqo S.R.L.",
-                    documento="20111222333", telefono="984222002",
-                    email="compras@distqosqo.pe"),
-            Cliente(tipo="NATURAL",  nombre="Ana Sofía Tupac Yupanqui",
-                    documento="45678912",    telefono="984111003"),
-            Cliente(tipo="JURIDICA", nombre="Restobar Machupicchu Beer House E.I.R.L.",
-                    documento="20333444555", telefono="984222004",
-                    email="bar@mpicchuhouse.pe"),
-            Cliente(tipo="NATURAL",  nombre="Carlos Eduardo Vargas Huanca",
-                    documento="87654321",    telefono="984111005"),
-            Cliente(tipo="JURIDICA", nombre="Restaurant El Qorikancha S.A.C.",
-                    documento="20444555666", telefono="984222006",
-                    email="chef@qorikancha.pe"),
-            Cliente(tipo="JURIDICA", nombre="Bodega Andina Hermanos Quispe",
-                    documento="20555666777", telefono="984222007",
-                    email="ventas@bodegaandina.pe"),
-            Cliente(tipo="NATURAL",  nombre="Milagros del Pilar Ccoa Flores",
-                    documento="32165498",    telefono="984111008"),
-            Cliente(tipo="JURIDICA", nombre="Hotel Los Apus Boutique S.A.C.",
-                    documento="20666777888", telefono="984222009",
-                    email="concierge@losapus.pe"),
-            Cliente(tipo="NATURAL",  nombre="Jorge Alfredo Mamani Condori",
-                    documento="65498732",    telefono="984111010"),
-        ]
 
-        # Añadir 10 clientes adicionales
-        for i in range(11, 21):
-            if i % 2 == 0:
-                tipo = "JURIDICA"
-                documento = f"20{i:09d}"  # RUC de 11 dígitos
-                email = f"cliente{i}@empresa.pe"
-            else:
-                tipo = "NATURAL"
-                documento = f"10{i:06d}"  # DNI de 8 dígitos
-                email = None
-            clientes.append(
-                Cliente(
-                    tipo=tipo,
-                    nombre=f"Cliente Adicional {i}",
-                    documento=documento,
-                    telefono=f"984333{i:03d}",
-                    email=email
-                )
-            )
-        db.add_all(clientes)
+@pytest.fixture
+def producto_terminado(db):
+    p = Producto(
+        codigo="PRD-T01", nombre="Cerveza Test",
+        tipo="Producto terminado", unidad_medida="L",
+        precio_venta=50.0, stock_minimo=5.0, activo=True,
+    )
+    db.add(p)
+    db.commit()
+    db.refresh(p)
+    return p
 
-        # ══════════════════════════════════════════════════════════
-        # RECETAS (20)
-        # ══════════════════════════════════════════════════════════
-        mp = {p.codigo: p for p in insumos}
-        pt = {p.codigo: p for p in terminados}
 
-        receta_anka     = Receta(producto_terminado_id=pt["PRD-001"].id,
-                                  descripcion="Lote estándar Anka Chida 100L.",
-                                  rendimiento=100.0, unidad_rendimiento="L")
-        receta_killa    = Receta(producto_terminado_id=pt["PRD-002"].id,
-                                  descripcion="Stout con miel, lote 80L.",
-                                  rendimiento=80.0,  unidad_rendimiento="L")
-        receta_inti     = Receta(producto_terminado_id=pt["PRD-003"].id,
-                                  descripcion="IPA cítrica con naranja, lote 80L.",
-                                  rendimiento=80.0,  unidad_rendimiento="L")
-        receta_weizen   = Receta(producto_terminado_id=pt["PRD-004"].id,
-                                  descripcion="Weizen con malta de trigo, lote 80L.",
-                                  rendimiento=80.0,  unidad_rendimiento="L")
-        receta_pachama  = Receta(producto_terminado_id=pt["PRD-005"].id,
-                                  descripcion="Porter oscura con cacao y canela, lote 60L.",
-                                  rendimiento=60.0,  unidad_rendimiento="L")
-        recetas_iniciales = [receta_anka, receta_killa, receta_inti, receta_weizen, receta_pachama]
-        db.add_all(recetas_iniciales)
-        db.flush()
+@pytest.fixture
+def cliente(db):
+    c = Cliente(tipo="NATURAL", nombre="Cliente Test", documento="99999999", activo=True)
+    db.add(c)
+    db.commit()
+    db.refresh(c)
+    return c
 
-        # Ingredientes de las recetas originales (17)
-        ingredientes_iniciales = [
-            # Anka Chida
-            IngredienteReceta(receta_id=receta_anka.id, insumo_id=mp["INS-001"].id, cantidad=25.0, unidad="kg"),
-            IngredienteReceta(receta_id=receta_anka.id, insumo_id=mp["INS-002"].id, cantidad=0.3,  unidad="kg"),
-            IngredienteReceta(receta_id=receta_anka.id, insumo_id=mp["INS-003"].id, cantidad=150.0, unidad="g"),
-            # Killa Negra
-            IngredienteReceta(receta_id=receta_killa.id, insumo_id=mp["INS-001"].id, cantidad=22.0, unidad="kg"),
-            IngredienteReceta(receta_id=receta_killa.id, insumo_id=mp["INS-005"].id, cantidad=6.0,  unidad="kg"),
-            IngredienteReceta(receta_id=receta_killa.id, insumo_id=mp["INS-003"].id, cantidad=120.0, unidad="g"),
-            # Inti IPA
-            IngredienteReceta(receta_id=receta_inti.id, insumo_id=mp["INS-001"].id, cantidad=20.0, unidad="kg"),
-            IngredienteReceta(receta_id=receta_inti.id, insumo_id=mp["INS-002"].id, cantidad=0.6,  unidad="kg"),
-            IngredienteReceta(receta_id=receta_inti.id, insumo_id=mp["INS-004"].id, cantidad=1.5,  unidad="kg"),
-            IngredienteReceta(receta_id=receta_inti.id, insumo_id=mp["INS-003"].id, cantidad=120.0, unidad="g"),
-            # Weizen
-            IngredienteReceta(receta_id=receta_weizen.id, insumo_id=mp["INS-001"].id, cantidad=12.0, unidad="kg"),
-            IngredienteReceta(receta_id=receta_weizen.id, insumo_id=mp["INS-006"].id, cantidad=14.0, unidad="kg"),
-            IngredienteReceta(receta_id=receta_weizen.id, insumo_id=mp["INS-013"].id, cantidad=100.0, unidad="g"),
-            # Pachamamita
-            IngredienteReceta(receta_id=receta_pachama.id, insumo_id=mp["INS-001"].id, cantidad=18.0, unidad="kg"),
-            IngredienteReceta(receta_id=receta_pachama.id, insumo_id=mp["INS-009"].id, cantidad=2.0,  unidad="kg"),
-            IngredienteReceta(receta_id=receta_pachama.id, insumo_id=mp["INS-010"].id, cantidad=0.3,  unidad="kg"),
-            IngredienteReceta(receta_id=receta_pachama.id, insumo_id=mp["INS-003"].id, cantidad=90.0, unidad="g"),
-        ]
-        db.add_all(ingredientes_iniciales)
 
-        # Crear 15 recetas adicionales (para alcanzar 20 en total)
-        nuevas_recetas = []
-        nuevos_ingredientes = []
+@pytest.fixture
+def receta(db, insumo, producto_terminado):
+    """
+    Receta de prueba: rinde 100 L y necesita 10 kg de insumo.
+    Factor de escala: si se producen 80 L reales → se consumen 8 kg.
+    """
+    r = Receta(
+        producto_terminado_id=producto_terminado.id,
+        descripcion="Receta de prueba",
+        rendimiento=100.0,
+        unidad_rendimiento="L",
+        activa=True,
+    )
+    db.add(r)
+    db.flush()
+    db.add(IngredienteReceta(receta_id=r.id, insumo_id=insumo.id, cantidad=10.0, unidad="kg"))
+    db.commit()
+    db.refresh(r)
+    return r
 
-        # 5 recetas para los nuevos productos terminados (PRD-006 a PRD-010)
-        recetas_para_nuevos = [
-            (pt["PRD-006"], "Chicha Morada Cerveza lote estándar 80L", 80.0),
-            (pt["PRD-007"], "Café Porter lote 60L", 60.0),
-            (pt["PRD-008"], "Jengibre Ale lote 70L", 70.0),
-            (pt["PRD-009"], "Hibiscus Sour lote 60L", 60.0),
-            (pt["PRD-010"], "Vainilla Stout lote 50L", 50.0),
-        ]
-        for prod_terminado, desc, rend in recetas_para_nuevos:
-            rec = Receta(producto_terminado_id=prod_terminado.id,
-                         descripcion=desc, rendimiento=rend, unidad_rendimiento="L")
-            nuevas_recetas.append(rec)
-            # Añadir 2-3 ingredientes genéricos para cada receta nueva
-            # Usaremos insumos existentes y algunos nuevos
-            nuevos_ingredientes.append(
-                IngredienteReceta(receta=rec, insumo_id=mp["INS-001"].id, cantidad=15.0, unidad="kg")
-            )
-            nuevos_ingredientes.append(
-                IngredienteReceta(receta=rec, insumo_id=mp["INS-003"].id, cantidad=100.0, unidad="g")
-            )
-            # Añadir un insumo extra si existe (INS-014 o más)
-            if len(insumos) >= 14:
-                nuevos_ingredientes.append(
-                    IngredienteReceta(receta=rec, insumo_id=insumos[13].id, cantidad=1.0, unidad="kg")
-                )
 
-        # 10 recetas adicionales para productos existentes (variaciones)
-        variaciones = [
-            (pt["PRD-001"], "Anka Chida Edición Especial 100L", 100.0),
-            (pt["PRD-001"], "Anka Chida Ligera 80L", 80.0),
-            (pt["PRD-002"], "Killa Negra Doble Malta 80L", 80.0),
-            (pt["PRD-002"], "Killa Negra Navideña 60L", 60.0),
-            (pt["PRD-003"], "Inti IPA Doble Lúpulo 80L", 80.0),
-            (pt["PRD-003"], "Inti IPA Tropical 60L", 60.0),
-            (pt["PRD-004"], "Cusqueña Dorada con Miel 80L", 80.0),
-            (pt["PRD-004"], "Cusqueña Dorada Festiva 70L", 70.0),
-            (pt["PRD-005"], "Pachamamita con Café 60L", 60.0),
-            (pt["PRD-005"], "Pachamamita Navideña 50L", 50.0),
-        ]
-        for prod_terminado, desc, rend in variaciones:
-            rec = Receta(producto_terminado_id=prod_terminado.id,
-                         descripcion=desc, rendimiento=rend, unidad_rendimiento="L")
-            nuevas_recetas.append(rec)
-            # Añadir 2 ingredientes genéricos
-            nuevos_ingredientes.append(
-                IngredienteReceta(receta=rec, insumo_id=mp["INS-001"].id, cantidad=12.0, unidad="kg")
-            )
-            nuevos_ingredientes.append(
-                IngredienteReceta(receta=rec, insumo_id=mp["INS-003"].id, cantidad=90.0, unidad="g")
-            )
+# ══════════════════════════════════════════════════════════════════
+#  1) SEGURIDAD — hash de contraseñas
+# ══════════════════════════════════════════════════════════════════
 
-        db.add_all(nuevas_recetas)
-        db.flush()  # Para obtener IDs de las nuevas recetas
-        # Ahora que las recetas tienen ID, asignar los ingredientes que usaban la relación directa
-        # Pero ya los creamos con 'receta=rec', lo cual debería funcionar si SQLAlchemy maneja la relación.
-        # Si no, hay que usar receta_id. Para simplificar, usaremos receta_id después del flush.
-        # Rehacer los ingredientes con receta_id explícito:
-        nuevos_ingredientes_con_id = []
-        for ing in nuevos_ingredientes:
-            # Obtener la receta asociada
-            receta_asociada = ing.receta
-            nuevos_ingredientes_con_id.append(
-                IngredienteReceta(
-                    receta_id=receta_asociada.id,
-                    insumo_id=ing.insumo_id,
-                    cantidad=ing.cantidad,
-                    unidad=ing.unidad
-                )
-            )
-        db.add_all(nuevos_ingredientes_con_id)
+class TestSeguridad:
 
+    def test_hash_no_guarda_texto_plano(self):
+        h = hash_contrasena("mi_secreto")
+        assert "mi_secreto" not in h
+
+    def test_verificar_contrasena_correcta(self):
+        h = hash_contrasena("mi_clave")
+        assert verificar_contrasena("mi_clave", h) is True
+
+    def test_verificar_contrasena_incorrecta(self):
+        h = hash_contrasena("mi_clave")
+        assert verificar_contrasena("otra_clave", h) is False
+
+    def test_cada_hash_tiene_sal_distinta(self):
+        """
+        La misma contraseña debe generar hashes distintos (por la sal aleatoria).
+        Si fueran iguales, un atacante podría usar tablas rainbow.
+        """
+        h1 = hash_contrasena("igual")
+        h2 = hash_contrasena("igual")
+        assert h1 != h2
+        # Pero ambos deben verificarse correctamente
+        assert verificar_contrasena("igual", h1)
+        assert verificar_contrasena("igual", h2)
+
+    def test_formato_invalido_devuelve_false(self):
+        """Un hash sin '$' no debe provocar excepción — solo devolver False."""
+        assert verificar_contrasena("clave", "hashsinformato") is False
+
+    def test_hash_vacio_no_se_verifica(self):
+        assert verificar_contrasena("clave", "") is False
+
+
+# ══════════════════════════════════════════════════════════════════
+#  2) AUTENTICACIÓN
+# ══════════════════════════════════════════════════════════════════
+
+class TestAutenticacion:
+
+    def test_login_exitoso_devuelve_datos_del_usuario(self, usuario_admin):
+        datos = iniciar_sesion("admin_test", "clave123")
+        assert datos["usuario"] == "admin_test"
+        assert datos["rol"] == "ADMIN"
+
+    def test_login_exitoso_activa_sesion(self, usuario_admin):
+        iniciar_sesion("admin_test", "clave123")
+        assert sesion_actual.hay_sesion_activa
+        assert sesion_actual.usuario == "admin_test"
+
+    def test_login_contrasena_incorrecta(self, usuario_admin):
+        with pytest.raises(ErrorAutenticacion):
+            iniciar_sesion("admin_test", "MAL_PASSWORD")
+
+    def test_login_usuario_inexistente(self):
+        with pytest.raises(ErrorAutenticacion):
+            iniciar_sesion("no_existe", "cualquiera")
+
+    def test_login_usuario_inactivo(self, db, usuario_admin):
+        usuario_admin.activo = False
+        db.commit()
+        with pytest.raises(ErrorAutenticacion):
+            iniciar_sesion("admin_test", "clave123")
+
+    def test_login_campos_vacios_lanza_error(self):
+        with pytest.raises(ErrorAutenticacion):
+            iniciar_sesion("", "")
+
+    def test_crear_usuario_nuevo(self):
+        u = crear_usuario("vendedor1", "Vendedor Uno", "pass456", "VENTAS")
+        assert u.id is not None
+        assert u.rol == "VENTAS"
+        assert u.activo is True
+
+    def test_crear_usuario_duplicado_lanza_error(self, usuario_admin):
+        with pytest.raises(ErrorAutenticacion):
+            crear_usuario("admin_test", "Otro Admin", "clave", "ADMIN")
+
+    def test_desactivar_usuario(self, db, usuario_admin):
+        desactivar_usuario(usuario_admin.id)
+        db.refresh(usuario_admin)
+        assert usuario_admin.activo is False
+
+    def test_reactivar_usuario(self, db, usuario_admin):
+        desactivar_usuario(usuario_admin.id)
+        reactivar_usuario(usuario_admin.id)
+        db.refresh(usuario_admin)
+        assert usuario_admin.activo is True
+
+    def test_desactivar_usuario_ya_inactivo_lanza_error(self, db, usuario_admin):
+        desactivar_usuario(usuario_admin.id)
+        with pytest.raises(ErrorAutenticacion):
+            desactivar_usuario(usuario_admin.id)
+
+
+# ══════════════════════════════════════════════════════════════════
+#  3) INVENTARIO — lotes y FIFO
+# ══════════════════════════════════════════════════════════════════
+
+class TestInventario:
+
+    def test_crear_lote_registra_stock(self, db, insumo):
+        crear_lote(db, producto_id=insumo.id, numero_lote="L-001",
+                   cantidad=50.0, costo_unitario=5.0)
+        db.commit()
+        assert stock_total(db, insumo.id) == 50.0
+
+    def test_stock_cero_si_no_hay_lotes(self, db, insumo):
+        assert stock_total(db, insumo.id) == 0.0
+
+    def test_stock_suma_varios_lotes(self, db, insumo):
+        crear_lote(db, producto_id=insumo.id, numero_lote="L-A", cantidad=30.0)
+        crear_lote(db, producto_id=insumo.id, numero_lote="L-B", cantidad=20.0)
+        db.commit()
+        assert stock_total(db, insumo.id) == 50.0
+
+    def test_fifo_consume_el_lote_mas_antiguo_primero(self, db, insumo):
+        """
+        Con dos lotes, FIFO debe empezar por el de fecha_ingreso más antigua.
+        """
+        lote_viejo = LoteInventario(
+            numero_lote="L-VIEJO", producto_id=insumo.id,
+            fecha_ingreso=date.today() - timedelta(days=5),
+            cantidad_inicial=30.0, cantidad_disponible=30.0,
+            costo_unitario=4.0, estado="DISPONIBLE",
+        )
+        lote_nuevo = LoteInventario(
+            numero_lote="L-NUEVO", producto_id=insumo.id,
+            fecha_ingreso=date.today(),
+            cantidad_inicial=30.0, cantidad_disponible=30.0,
+            costo_unitario=6.0, estado="DISPONIBLE",
+        )
+        db.add_all([lote_viejo, lote_nuevo])
         db.commit()
 
-        # Guardamos IDs para usarlos fuera de la sesión
-        ids = {
-            "prov_maltas":    proveedores[0].id,
-            "prov_lupulos":   proveedores[1].id,
-            "prov_apicola":   proveedores[2].id,
-            "prov_envases":   proveedores[3].id,
-            "prov_granos":    proveedores[4].id,
-            "prov_quimica":   proveedores[5].id,
-            "prov_agua":      proveedores[6].id,
-            "prov_matinsumos": proveedores[7].id,
-            "rec_anka":       receta_anka.id,
-            "rec_killa":      receta_killa.id,
-            "rec_inti":       receta_inti.id,
-            "rec_weizen":     receta_weizen.id,
-            "rec_pachama":    receta_pachama.id,
-            **{f"cli_{i}": c.id for i, c in enumerate(clientes)},
-            **{f"ins_{k.lower().replace('-', '_')}": v.id for k, v in mp.items()},
-            **{f"prd_{k.lower().replace('-', '_')}": v.id for k, v in pt.items()},
-        }
+        consumidos = consumir_fifo(db, insumo.id, 20.0, "CONSUMO")
+        db.commit()
 
-        # Añadir IDs de nuevas recetas y nuevos insumos, proveedores, etc. al diccionario
-        for i, rec in enumerate(nuevas_recetas, start=1):
-            ids[f"rec_nueva_{i}"] = rec.id
-        # Añadir IDs de nuevos proveedores (índices 8 a 19)
-        for i, prov in enumerate(proveedores[8:], start=8):
-            ids[f"prov_extra_{i}"] = prov.id
-        # Añadir IDs de nuevos clientes (índices 10 a 19)
-        for i, cli in enumerate(clientes[10:], start=10):
-            ids[f"cli_extra_{i}"] = cli.id
+        assert consumidos[0][0].numero_lote == "L-VIEJO"
+        assert consumidos[0][1] == 20.0        # tomó todo de L-VIEJO
+        assert len(consumidos) == 1             # no necesitó el segundo
 
-    # ══════════════════════════════════════════════════════════
-    # COMPRAS (20 órdenes) — stock generoso para toda la producción
-    # ══════════════════════════════════════════════════════════
+    def test_fifo_pasa_al_siguiente_lote_si_el_primero_no_alcanza(self, db, insumo):
+        lote_a = LoteInventario(
+            numero_lote="L-A", producto_id=insumo.id,
+            fecha_ingreso=date.today() - timedelta(days=1),
+            cantidad_inicial=5.0, cantidad_disponible=5.0,
+            costo_unitario=4.0, estado="DISPONIBLE",
+        )
+        lote_b = LoteInventario(
+            numero_lote="L-B", producto_id=insumo.id,
+            fecha_ingreso=date.today(),
+            cantidad_inicial=10.0, cantidad_disponible=10.0,
+            costo_unitario=5.0, estado="DISPONIBLE",
+        )
+        db.add_all([lote_a, lote_b])
+        db.commit()
 
-    # Las 10 compras originales (C1 a C10) se mantienen igual...
-    # (Se omite el código original para no duplicar, pero está incluido en el archivo final)
-    # A continuación se añaden 10 compras adicionales (C11 a C20)
+        consumidos = consumir_fifo(db, insumo.id, 8.0, "CONSUMO")
+        db.commit()
 
-    # C11 — Compra de insumos extra
-    registrar_compra(
-        proveedor_id=ids["prov_extra_8"],
-        items=[
-            {"producto_id": ids["ins_ins_014"], "cantidad": 30.0, "precio_unitario": 5.0},
-            {"producto_id": ids["ins_ins_015"], "cantidad": 15.0, "precio_unitario": 20.0},
-        ],
-        documento_referencia="F011-000111",
-    )
+        assert len(consumidos) == 2
+        assert consumidos[0][1] == 5.0    # todo el lote A
+        assert consumidos[1][1] == 3.0    # los 3 restantes del lote B
 
-    # C12 — Compra de lúpulo y levadura para nuevas recetas
-    registrar_compra(
-        proveedor_id=ids["prov_lupulos"],
-        items=[
-            {"producto_id": ids["ins_ins_002"], "cantidad": 12.0, "precio_unitario": 59.0},
-            {"producto_id": ids["ins_ins_003"], "cantidad": 3000.0, "precio_unitario": 0.13},
-        ],
-        documento_referencia="F012-000112",
-    )
+    def test_fifo_marca_lote_agotado_cuando_llega_a_cero(self, db, insumo):
+        lote = LoteInventario(
+            numero_lote="L-AGO", producto_id=insumo.id,
+            cantidad_inicial=10.0, cantidad_disponible=10.0,
+            costo_unitario=5.0, estado="DISPONIBLE",
+        )
+        db.add(lote)
+        db.commit()
 
-    # C13 — Compra de malta y trigo para más producción
-    registrar_compra(
-        proveedor_id=ids["prov_maltas"],
-        items=[
-            {"producto_id": ids["ins_ins_001"], "cantidad": 300.0, "precio_unitario": 4.15},
-            {"producto_id": ids["ins_ins_006"], "cantidad": 80.0, "precio_unitario": 4.85},
-        ],
-        documento_referencia="F013-000113",
-    )
+        consumir_fifo(db, insumo.id, 10.0, "CONSUMO")
+        db.commit()
+        db.refresh(lote)
 
-    # C14 — Compra de insumos para recetas de café y vainilla
-    registrar_compra(
-        proveedor_id=ids["prov_quimica"],
-        items=[
-            {"producto_id": ids["ins_ins_015"], "cantidad": 10.0, "precio_unitario": 25.0},
-            {"producto_id": ids["ins_ins_016"], "cantidad": 2.0, "precio_unitario": 80.0},
-        ],
-        documento_referencia="F014-000114",
-    )
+        assert lote.estado == "AGOTADO"
+        assert lote.cantidad_disponible == 0.0
 
-    # C15 — Compra de jengibre y flor de jamaica
-    registrar_compra(
-        proveedor_id=ids["prov_extra_9"],
-        items=[
-            {"producto_id": ids["ins_ins_017"], "cantidad": 20.0, "precio_unitario": 12.0},
-            {"producto_id": ids["ins_ins_020"], "cantidad": 10.0, "precio_unitario": 18.0},
-        ],
-        documento_referencia="F015-000115",
-    )
+    def test_stock_insuficiente_lanza_excepcion(self, db, insumo):
+        crear_lote(db, producto_id=insumo.id, numero_lote="L-POCO",
+                   cantidad=5.0, costo_unitario=3.0)
+        db.commit()
+        with pytest.raises(StockInsuficiente):
+            consumir_fifo(db, insumo.id, 100.0, "CONSUMO")
 
-    # C16 — Compra de clavo y pimienta
-    registrar_compra(
-        proveedor_id=ids["prov_extra_10"],
-        items=[
-            {"producto_id": ids["ins_ins_018"], "cantidad": 5.0, "precio_unitario": 30.0},
-            {"producto_id": ids["ins_ins_019"], "cantidad": 4.0, "precio_unitario": 45.0},
-        ],
-        documento_referencia="F016-000116",
-    )
+    def test_stock_cero_lanza_stock_insuficiente(self, db, insumo):
+        with pytest.raises(StockInsuficiente):
+            consumir_fifo(db, insumo.id, 1.0, "CONSUMO")
 
-    # C17 — Compra de miel y azúcar
-    registrar_compra(
-        proveedor_id=ids["prov_apicola"],
-        items=[
-            {"producto_id": ids["ins_ins_005"], "cantidad": 40.0, "precio_unitario": 22.0},
-            {"producto_id": ids["ins_ins_008"], "cantidad": 30.0, "precio_unitario": 3.60},
-        ],
-        documento_referencia="F017-000117",
-    )
+    def test_ajustar_stock_hacia_arriba(self, db, insumo):
+        crear_lote(db, producto_id=insumo.id, numero_lote="L-AJU",
+                   cantidad=20.0, costo_unitario=4.0)
+        db.commit()
+        lote = db.query(LoteInventario).filter_by(numero_lote="L-AJU").first()
+        ajustar_stock(db, lote.id, 30.0, "Conteo físico positivo")
+        db.commit()
+        db.refresh(lote)
+        assert lote.cantidad_disponible == 30.0
+        assert lote.estado == "DISPONIBLE"
 
-    # C18 — Compra de maltas especiales
-    registrar_compra(
-        proveedor_id=ids["prov_granos"],
-        items=[
-            {"producto_id": ids["ins_ins_001"], "cantidad": 150.0, "precio_unitario": 4.20},
-            {"producto_id": ids["ins_ins_012"], "cantidad": 25.0, "precio_unitario": 8.50},
-        ],
-        documento_referencia="F018-000118",
-    )
+    def test_ajustar_stock_a_cero_marca_agotado(self, db, insumo):
+        crear_lote(db, producto_id=insumo.id, numero_lote="L-AGO2",
+                   cantidad=10.0, costo_unitario=4.0)
+        db.commit()
+        lote = db.query(LoteInventario).filter_by(numero_lote="L-AGO2").first()
+        ajustar_stock(db, lote.id, 0.0, "Error de conteo")
+        db.commit()
+        db.refresh(lote)
+        assert lote.estado == "AGOTADO"
 
-    # C19 — Compra de levadura y lúpulo para IPA
-    registrar_compra(
-        proveedor_id=ids["prov_lupulos"],
-        items=[
-            {"producto_id": ids["ins_ins_007"], "cantidad": 8.0, "precio_unitario": 55.0},
-            {"producto_id": ids["ins_ins_013"], "cantidad": 400.0, "precio_unitario": 0.20},
-        ],
-        documento_referencia="F019-000119",
-    )
+    def test_productos_bajo_minimo_detecta_faltante(self, db, insumo):
+        """
+        insumo tiene stock_minimo=10. Con sólo 2 kg debe aparecer en la lista.
+        """
+        crear_lote(db, producto_id=insumo.id, numero_lote="L-BAJO",
+                   cantidad=2.0, costo_unitario=5.0)
+        db.commit()
+        resultado = productos_bajo_minimo(db)
+        ids_bajos = [r["id"] for r in resultado]
+        assert insumo.id in ids_bajos
 
-    # C20 — Compra de cacao y canela extra
-    registrar_compra(
-        proveedor_id=ids["prov_quimica"],
-        items=[
-            {"producto_id": ids["ins_ins_009"], "cantidad": 12.0, "precio_unitario": 24.5},
-            {"producto_id": ids["ins_ins_010"], "cantidad": 4.0, "precio_unitario": 15.0},
-        ],
-        documento_referencia="F020-000120",
-    )
+    def test_productos_bajo_minimo_no_incluye_stock_suficiente(self, db, insumo):
+        crear_lote(db, producto_id=insumo.id, numero_lote="L-OK",
+                   cantidad=50.0, costo_unitario=5.0)   # 50 > stock_minimo=10
+        db.commit()
+        resultado = productos_bajo_minimo(db)
+        ids_bajos = [r["id"] for r in resultado]
+        assert insumo.id not in ids_bajos
 
-    # ══════════════════════════════════════════════════════════
-    # PRODUCCIÓN (25 órdenes)
-    # 20 cerradas, 3 en proceso, 2 iniciadas
-    # ══════════════════════════════════════════════════════════
+    def test_lotes_proximos_a_vencer(self, db, insumo):
+        lote = LoteInventario(
+            numero_lote="L-VENC", producto_id=insumo.id,
+            cantidad_inicial=10.0, cantidad_disponible=10.0,
+            costo_unitario=5.0, estado="DISPONIBLE",
+            fecha_vencimiento=date.today() + timedelta(days=10),  # vence en 10 días
+        )
+        db.add(lote)
+        db.commit()
+        resultado = lotes_proximos_a_vencer(db, dias=30)
+        numeros = [l.numero_lote for l in resultado]
+        assert "L-VENC" in numeros
 
-    # Las 10 órdenes originales (P1 a P10) se mantienen igual...
-    # (Se omite el código original para no duplicar, pero está incluido en el archivo final)
-    # A continuación se añaden 15 órdenes adicionales (P11 a P25)
+    def test_lotes_sin_fecha_vencimiento_no_aparecen_en_proximos(self, db, insumo):
+        lote = LoteInventario(
+            numero_lote="L-SIN-VEN", producto_id=insumo.id,
+            cantidad_inicial=10.0, cantidad_disponible=10.0,
+            costo_unitario=5.0, estado="DISPONIBLE",
+            fecha_vencimiento=None,
+        )
+        db.add(lote)
+        db.commit()
+        resultado = lotes_proximos_a_vencer(db, dias=30)
+        numeros = [l.numero_lote for l in resultado]
+        assert "L-SIN-VEN" not in numeros
 
-    # --- Órdenes cerradas adicionales (13) ---
-    # P11 - Anka Chida lote 3 (cerrada)
-    op11 = crear_orden(receta_id=ids["rec_nueva_1"], cantidad_planeada=80.0,
-                       numero_lote="LOTE-2026-011", observaciones="Chicha Morada Cerveza lote 1")
-    iniciar_proceso(op11.id)
-    cerrar_orden(op11.id, cantidad_real=78.0, cantidad_merma=2.0,
-                 causa_merma="Pérdida normal", costo_mano_obra=150.0, costos_indirectos=50.0)
 
-    # P12 - Café Porter (cerrada)
-    op12 = crear_orden(receta_id=ids["rec_nueva_2"], cantidad_planeada=60.0,
-                       numero_lote="LOTE-2026-012", observaciones="Café Porter lote 1")
-    iniciar_proceso(op12.id)
-    cerrar_orden(op12.id, cantidad_real=58.0, cantidad_merma=2.0,
-                 causa_merma="Absorción del café", costo_mano_obra=140.0, costos_indirectos=45.0)
+# ══════════════════════════════════════════════════════════════════
+#  4) COMPRAS
+# ══════════════════════════════════════════════════════════════════
 
-    # P13 - Jengibre Ale (cerrada)
-    op13 = crear_orden(receta_id=ids["rec_nueva_3"], cantidad_planeada=70.0,
-                       numero_lote="LOTE-2026-013", observaciones="Jengibre Ale lote 1")
-    iniciar_proceso(op13.id)
-    cerrar_orden(op13.id, cantidad_real=68.0, cantidad_merma=2.0,
-                 causa_merma="Pérdida mínima", costo_mano_obra=155.0, costos_indirectos=48.0)
+class TestCompras:
 
-    # P14 - Hibiscus Sour (cerrada)
-    op14 = crear_orden(receta_id=ids["rec_nueva_4"], cantidad_planeada=60.0,
-                       numero_lote="LOTE-2026-014", observaciones="Hibiscus Sour lote 1")
-    iniciar_proceso(op14.id)
-    cerrar_orden(op14.id, cantidad_real=59.0, cantidad_merma=1.0,
-                 causa_merma="Pérdida normal", costo_mano_obra=145.0, costos_indirectos=42.0)
+    def test_registrar_compra_crea_orden(self, proveedor, insumo):
+        orden = registrar_compra(
+            proveedor_id=proveedor.id,
+            items=[{"producto_id": insumo.id, "cantidad": 100.0, "precio_unitario": 5.0}],
+        )
+        assert orden.id is not None
+        assert orden.numero.startswith("OC-")
 
-    # P15 - Vainilla Stout (cerrada)
-    op15 = crear_orden(receta_id=ids["rec_nueva_5"], cantidad_planeada=50.0,
-                       numero_lote="LOTE-2026-015", observaciones="Vainilla Stout lote 1")
-    iniciar_proceso(op15.id)
-    cerrar_orden(op15.id, cantidad_real=48.0, cantidad_merma=2.0,
-                 causa_merma="Vainilla absorbida", costo_mano_obra=130.0, costos_indirectos=40.0)
+    def test_total_calculado_correctamente(self, proveedor, insumo):
+        orden = registrar_compra(
+            proveedor_id=proveedor.id,
+            items=[
+                {"producto_id": insumo.id, "cantidad": 10.0, "precio_unitario": 4.0},
+            ],
+        )
+        assert orden.total == pytest.approx(40.0)
 
-    # P16 - Variación Anka Chida (cerrada)
-    op16 = crear_orden(receta_id=ids["rec_nueva_6"], cantidad_planeada=100.0,
-                       numero_lote="LOTE-2026-016", observaciones="Anka Especial")
-    iniciar_proceso(op16.id)
-    cerrar_orden(op16.id, cantidad_real=97.0, cantidad_merma=3.0,
-                 causa_merma="Pérdida normal", costo_mano_obra=180.0, costos_indirectos=55.0)
+    def test_compra_actualiza_stock(self, db, proveedor, insumo):
+        registrar_compra(
+            proveedor_id=proveedor.id,
+            items=[{"producto_id": insumo.id, "cantidad": 50.0, "precio_unitario": 5.0}],
+        )
+        assert stock_total(db, insumo.id) == 50.0
 
-    # P17 - Variación Killa Negra (cerrada)
-    op17 = crear_orden(receta_id=ids["rec_nueva_7"], cantidad_planeada=80.0,
-                       numero_lote="LOTE-2026-017", observaciones="Killa Doble Malta")
-    iniciar_proceso(op17.id)
-    cerrar_orden(op17.id, cantidad_real=76.0, cantidad_merma=4.0,
-                 causa_merma="Fermentación", costo_mano_obra=160.0, costos_indirectos=50.0)
+    def test_numeracion_correlativa(self, proveedor, insumo):
+        orden1 = registrar_compra(
+            proveedor_id=proveedor.id,
+            items=[{"producto_id": insumo.id, "cantidad": 10.0, "precio_unitario": 5.0}],
+        )
+        orden2 = registrar_compra(
+            proveedor_id=proveedor.id,
+            items=[{"producto_id": insumo.id, "cantidad": 20.0, "precio_unitario": 5.0}],
+        )
+        n1 = int(orden1.numero.split("-")[1])
+        n2 = int(orden2.numero.split("-")[1])
+        assert n2 == n1 + 1
 
-    # P18 - Variación Inti IPA (cerrada)
-    op18 = crear_orden(receta_id=ids["rec_nueva_8"], cantidad_planeada=80.0,
-                       numero_lote="LOTE-2026-018", observaciones="IPA Doble Lúpulo")
-    iniciar_proceso(op18.id)
-    cerrar_orden(op18.id, cantidad_real=75.0, cantidad_merma=5.0,
-                 causa_merma="Dry-hop", costo_mano_obra=165.0, costos_indirectos=52.0)
+    def test_compra_multiples_productos_un_lote_por_producto(self, db, proveedor, insumo):
+        insumo2 = Producto(
+            codigo="INS-T02", nombre="Lúpulo Test",
+            tipo="Insumo", unidad_medida="kg", stock_minimo=5.0, activo=True,
+        )
+        db.add(insumo2)
+        db.commit()
+        db.refresh(insumo2)
 
-    # P19 - Variación Weizen (cerrada)
-    op19 = crear_orden(receta_id=ids["rec_nueva_9"], cantidad_planeada=80.0,
-                       numero_lote="LOTE-2026-019", observaciones="Weizen con Miel")
-    iniciar_proceso(op19.id)
-    cerrar_orden(op19.id, cantidad_real=78.0, cantidad_merma=2.0,
-                 causa_merma="Pérdida mínima", costo_mano_obra=150.0, costos_indirectos=45.0)
+        registrar_compra(
+            proveedor_id=proveedor.id,
+            items=[
+                {"producto_id": insumo.id,  "cantidad": 30.0, "precio_unitario": 4.0},
+                {"producto_id": insumo2.id, "cantidad": 10.0, "precio_unitario": 60.0},
+            ],
+        )
+        assert stock_total(db, insumo.id)  == 30.0
+        assert stock_total(db, insumo2.id) == 10.0
 
-    # P20 - Variación Pachamamita (cerrada)
-    op20 = crear_orden(receta_id=ids["rec_nueva_10"], cantidad_planeada=60.0,
-                       numero_lote="LOTE-2026-020", observaciones="Pachamamita con Café")
-    iniciar_proceso(op20.id)
-    cerrar_orden(op20.id, cantidad_real=57.0, cantidad_merma=3.0,
-                 causa_merma="Absorción", costo_mano_obra=140.0, costos_indirectos=48.0)
 
-    # P21 - Variación Anka Ligera (cerrada)
-    op21 = crear_orden(receta_id=ids["rec_nueva_11"], cantidad_planeada=80.0,
-                       numero_lote="LOTE-2026-021", observaciones="Anka Ligera")
-    iniciar_proceso(op21.id)
-    cerrar_orden(op21.id, cantidad_real=79.0, cantidad_merma=1.0,
-                 causa_merma="Pérdida normal", costo_mano_obra=155.0, costos_indirectos=45.0)
+# ══════════════════════════════════════════════════════════════════
+#  5) VENTAS
+# ══════════════════════════════════════════════════════════════════
 
-    # P22 - Variación Killa Navideña (cerrada)
-    op22 = crear_orden(receta_id=ids["rec_nueva_12"], cantidad_planeada=60.0,
-                       numero_lote="LOTE-2026-022", observaciones="Killa Navideña")
-    iniciar_proceso(op22.id)
-    cerrar_orden(op22.id, cantidad_real=58.0, cantidad_merma=2.0,
-                 causa_merma="Pérdida", costo_mano_obra=135.0, costos_indirectos=42.0)
+class TestVentas:
 
-    # P23 - Variación IPA Tropical (cerrada)
-    op23 = crear_orden(receta_id=ids["rec_nueva_13"], cantidad_planeada=60.0,
-                       numero_lote="LOTE-2026-023", observaciones="IPA Tropical")
-    iniciar_proceso(op23.id)
-    cerrar_orden(op23.id, cantidad_real=57.0, cantidad_merma=3.0,
-                 causa_merma="Dry-hop", costo_mano_obra=145.0, costos_indirectos=46.0)
+    def _cargar_stock(self, db, producto, cantidad, numero="LV-001"):
+        crear_lote(db, producto_id=producto.id, numero_lote=numero,
+                   cantidad=cantidad, costo_unitario=30.0)
+        db.commit()
 
-    # P24 - Variación Weizen Festiva (en proceso)
-    op24 = crear_orden(receta_id=ids["rec_nueva_14"], cantidad_planeada=70.0,
-                       numero_lote="LOTE-2026-024", observaciones="Weizen Festiva")
-    iniciar_proceso(op24.id)  # queda EN_PROCESO
+    def test_registrar_venta_crea_orden(self, db, producto_terminado, cliente):
+        self._cargar_stock(db, producto_terminado, 50.0)
+        orden = registrar_venta(
+            cliente_id=cliente.id,
+            items=[{"producto_id": producto_terminado.id,
+                    "cantidad": 10.0, "precio_unitario": 50.0}],
+        )
+        assert orden.id is not None
+        assert orden.numero.startswith("OV-")
 
-    # P25 - Variación Pachamamita Navideña (iniciada)
-    crear_orden(receta_id=ids["rec_nueva_15"], cantidad_planeada=50.0,
-                numero_lote="LOTE-2026-025", observaciones="Pachamamita Navideña - pendiente")
+    def test_venta_descuenta_stock(self, db, producto_terminado, cliente):
+        self._cargar_stock(db, producto_terminado, 50.0)
+        registrar_venta(
+            cliente_id=cliente.id,
+            items=[{"producto_id": producto_terminado.id,
+                    "cantidad": 20.0, "precio_unitario": 50.0}],
+        )
+        assert stock_total(db, producto_terminado.id) == 30.0
 
-    # ══════════════════════════════════════════════════════════
-    # VENTAS (20 órdenes)
-    # ══════════════════════════════════════════════════════════
+    def test_venta_total_calculado_correctamente(self, db, producto_terminado, cliente):
+        self._cargar_stock(db, producto_terminado, 50.0)
+        orden = registrar_venta(
+            cliente_id=cliente.id,
+            items=[{"producto_id": producto_terminado.id,
+                    "cantidad": 10.0, "precio_unitario": 45.0}],
+        )
+        assert orden.total == pytest.approx(450.0)
 
-    def _v(cliente_idx, items):
-        registrar_venta(cliente_id=ids[f"cli_{cliente_idx}"], items=items)
+    def test_venta_sin_stock_lanza_excepcion(self, cliente, producto_terminado):
+        with pytest.raises(StockInsuficiente):
+            registrar_venta(
+                cliente_id=cliente.id,
+                items=[{"producto_id": producto_terminado.id,
+                        "cantidad": 100.0, "precio_unitario": 50.0}],
+            )
 
-    prd_anka   = ids["prd_prd_001"]
-    prd_killa  = ids["prd_prd_002"]
-    prd_inti   = ids["prd_prd_003"]
-    prd_weizen = ids["prd_prd_004"]
-    prd_pachama = ids["prd_prd_005"]
-    # Nuevos productos
-    prd_chicha = ids["prd_prd_006"]
-    prd_cafe   = ids["prd_prd_007"]
-    prd_jengibre = ids["prd_prd_008"]
-    prd_hibiscus = ids["prd_prd_009"]
-    prd_vainilla = ids["prd_prd_010"]
+    def test_venta_stock_parcial_no_registra_nada(self, db, producto_terminado, cliente):
+        """
+        Si un item no tiene stock suficiente, la venta COMPLETA debe fallar
+        (no se registra nada a medias — atomicidad).
+        """
+        self._cargar_stock(db, producto_terminado, 5.0)
+        stock_antes = stock_total(db, producto_terminado.id)
 
-    # Ventas originales (V1 a V15) se mantienen...
-    # (Se omite el código original para no duplicar, pero está incluido en el archivo final)
-    # A continuación se añaden 5 ventas adicionales (V16 a V20)
+        with pytest.raises(StockInsuficiente):
+            registrar_venta(
+                cliente_id=cliente.id,
+                items=[{"producto_id": producto_terminado.id,
+                        "cantidad": 100.0, "precio_unitario": 50.0}],
+            )
+        # El stock no debe haber cambiado
+        assert stock_total(db, producto_terminado.id) == stock_antes
 
-    _v(10, [{"producto_id": prd_chicha,   "cantidad": 30.0, "precio_unitario": 40.0}])
-    _v(11, [{"producto_id": prd_cafe,     "cantidad": 20.0, "precio_unitario": 58.0},
-            {"producto_id": prd_jengibre, "cantidad": 15.0, "precio_unitario": 46.0}])
-    _v(12, [{"producto_id": prd_hibiscus, "cantidad": 25.0, "precio_unitario": 49.0}])
-    _v(13, [{"producto_id": prd_vainilla, "cantidad": 18.0, "precio_unitario": 60.0},
-            {"producto_id": prd_anka,     "cantidad": 10.0, "precio_unitario": 45.0}])
-    _v(14, [{"producto_id": prd_inti,     "cantidad": 40.0, "precio_unitario": 48.0},
-            {"producto_id": prd_chicha,   "cantidad": 20.0, "precio_unitario": 40.0}])
+    def test_numeracion_correlativa_ventas(self, db, producto_terminado, cliente):
+        self._cargar_stock(db, producto_terminado, 100.0, "LV-MULTI")
+        ov1 = registrar_venta(
+            cliente_id=cliente.id,
+            items=[{"producto_id": producto_terminado.id,
+                    "cantidad": 5.0, "precio_unitario": 50.0}],
+        )
+        ov2 = registrar_venta(
+            cliente_id=cliente.id,
+            items=[{"producto_id": producto_terminado.id,
+                    "cantidad": 5.0, "precio_unitario": 50.0}],
+        )
+        n1 = int(ov1.numero.split("-")[1])
+        n2 = int(ov2.numero.split("-")[1])
+        assert n2 == n1 + 1
 
-    # Capital inicial de referencia
-    establecer_parametro("capital_inicial", "25000.00")
 
-    print("[datos_iniciales] Base de datos inicializada con datos completos de ejemplo (20+ filas por tabla).")
+# ══════════════════════════════════════════════════════════════════
+#  6) PRODUCCIÓN — ciclo completo
+# ══════════════════════════════════════════════════════════════════
+
+class TestProduccion:
+
+    def test_crear_orden_inicia_en_estado_iniciada(self, receta):
+        orden = crear_orden(receta_id=receta.id, cantidad_planeada=80.0,
+                            numero_lote="LP-001")
+        assert orden.estado == "INICIADA"
+        assert orden.numero.startswith("OP-")
+
+    def test_iniciar_proceso_cambia_estado_a_en_proceso(self, receta):
+        orden = crear_orden(receta_id=receta.id, cantidad_planeada=80.0,
+                            numero_lote="LP-002")
+        orden = iniciar_proceso(orden.id)
+        assert orden.estado == "EN_PROCESO"
+
+    def test_iniciar_proceso_desde_estado_invalido_lanza_error(self, receta):
+        orden = crear_orden(receta_id=receta.id, cantidad_planeada=80.0,
+                            numero_lote="LP-003")
+        iniciar_proceso(orden.id)           # pasa a EN_PROCESO
+        with pytest.raises(ValueError):
+            iniciar_proceso(orden.id)       # ya no está INICIADA
+
+    def test_cerrar_orden_cambia_estado_a_completada(self, db, insumo, receta):
+        # La receta pide 10 kg para 100 L. Producir 100 L consume 10 kg.
+        crear_lote(db, producto_id=insumo.id, numero_lote="LI-001",
+                   cantidad=20.0, costo_unitario=4.0)
+        db.commit()
+
+        orden = crear_orden(receta_id=receta.id, cantidad_planeada=100.0,
+                            numero_lote="LP-004")
+        iniciar_proceso(orden.id)
+        orden = cerrar_orden(orden.id, cantidad_real=100.0, cantidad_merma=0.0,
+                             causa_merma="", costo_mano_obra=100.0,
+                             costos_indirectos=50.0)
+        assert orden.estado == "COMPLETADA"
+
+    def test_cerrar_orden_crea_stock_de_producto_terminado(self, db, insumo, receta,
+                                                            producto_terminado):
+        crear_lote(db, producto_id=insumo.id, numero_lote="LI-002",
+                   cantidad=20.0, costo_unitario=4.0)
+        db.commit()
+
+        orden = crear_orden(receta_id=receta.id, cantidad_planeada=100.0,
+                            numero_lote="LP-005")
+        iniciar_proceso(orden.id)
+        cerrar_orden(orden.id, cantidad_real=100.0, cantidad_merma=0.0,
+                     causa_merma="", costo_mano_obra=100.0, costos_indirectos=50.0)
+
+        assert stock_total(db, producto_terminado.id) == 100.0
+
+    def test_cerrar_orden_consume_insumos_segun_factor_escala(self, db, insumo, receta):
+        """
+        Receta: 10 kg para 100 L. Si se producen 80 L (factor 0.8),
+        se deben consumir 8 kg.
+        """
+        crear_lote(db, producto_id=insumo.id, numero_lote="LI-003",
+                   cantidad=20.0, costo_unitario=4.0)
+        db.commit()
+
+        orden = crear_orden(receta_id=receta.id, cantidad_planeada=80.0,
+                            numero_lote="LP-006")
+        iniciar_proceso(orden.id)
+        cerrar_orden(orden.id, cantidad_real=80.0, cantidad_merma=0.0,
+                     causa_merma="", costo_mano_obra=100.0, costos_indirectos=50.0)
+
+        # 20 kg - 8 kg consumidos = 12 kg restantes
+        assert stock_total(db, insumo.id) == pytest.approx(12.0, abs=0.01)
+
+    def test_cerrar_orden_sin_stock_lanza_stock_insuficiente(self, receta):
+        """Si no hay insumos, cerrar la orden debe fallar con StockInsuficiente."""
+        orden = crear_orden(receta_id=receta.id, cantidad_planeada=80.0,
+                            numero_lote="LP-007")
+        iniciar_proceso(orden.id)
+        with pytest.raises(StockInsuficiente):
+            cerrar_orden(orden.id, cantidad_real=80.0, cantidad_merma=0.0,
+                         causa_merma="", costo_mano_obra=100.0, costos_indirectos=50.0)
+
+    def test_cerrar_orden_registra_costo_de_produccion(self, db, insumo, receta):
+        """
+        Al cerrar, debe quedar un registro en costos_produccion con los
+        valores calculados correctamente.
+
+        Cálculo esperado:
+          costo_insumos = 10 kg * 4 S/kg = 40 S/
+          costo_total   = 40 + 200 (M.O.) + 100 (indirectos) = 340 S/
+          costo_unitario = 340 / 100 L = 3.40 S/L
+        """
+        crear_lote(db, producto_id=insumo.id, numero_lote="LI-004",
+                   cantidad=20.0, costo_unitario=4.0)
+        db.commit()
+
+        orden = crear_orden(receta_id=receta.id, cantidad_planeada=100.0,
+                            numero_lote="LP-008")
+        iniciar_proceso(orden.id)
+        orden = cerrar_orden(orden.id, cantidad_real=100.0, cantidad_merma=0.0,
+                             causa_merma="", costo_mano_obra=200.0,
+                             costos_indirectos=100.0)
+
+        with nueva_sesion() as s:
+            costo = s.query(CostoProduccion).filter_by(orden_id=orden.id).first()
+
+        assert costo is not None
+        assert costo.costo_insumos    == pytest.approx(40.0,  abs=0.01)
+        assert costo.costo_total      == pytest.approx(340.0, abs=0.01)
+        assert costo.costo_unitario   == pytest.approx(3.40,  abs=0.01)
+
+    def test_cerrar_orden_calcula_margen_correctamente(self, db, insumo, receta,
+                                                        producto_terminado):
+        """
+        precio_venta del producto terminado = 50 S/L (definido en el fixture).
+        costo_unitario = 340 / 100 = 3.40 S/L (ver test anterior).
+        margen_unitario = 50 - 3.40 = 46.60 S/L
+        margen_porcentaje = 46.60 / 50 * 100 = 93.2%
+        """
+        crear_lote(db, producto_id=insumo.id, numero_lote="LI-005",
+                   cantidad=20.0, costo_unitario=4.0)
+        db.commit()
+
+        orden = crear_orden(receta_id=receta.id, cantidad_planeada=100.0,
+                            numero_lote="LP-009")
+        iniciar_proceso(orden.id)
+        orden = cerrar_orden(orden.id, cantidad_real=100.0, cantidad_merma=0.0,
+                             causa_merma="", costo_mano_obra=200.0,
+                             costos_indirectos=100.0)
+
+        with nueva_sesion() as s:
+            costo = s.query(CostoProduccion).filter_by(orden_id=orden.id).first()
+
+        assert costo.margen_unitario   == pytest.approx(46.60, abs=0.01)
+        assert costo.margen_porcentaje == pytest.approx(93.2,  abs=0.1)
+
+    def test_numeracion_correlativa_ordenes(self, receta):
+        op1 = crear_orden(receta_id=receta.id, cantidad_planeada=50.0,
+                          numero_lote="LP-N1")
+        op2 = crear_orden(receta_id=receta.id, cantidad_planeada=50.0,
+                          numero_lote="LP-N2")
+        n1 = int(op1.numero.split("-")[1])
+        n2 = int(op2.numero.split("-")[1])
+        assert n2 == n1 + 1

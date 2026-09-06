@@ -51,6 +51,7 @@ class VistaProduccion(ttk.Frame):
             barra.agregar_boton("▶ Iniciar proceso", self._iniciar)
         if puede_cerrar:
             barra.agregar_boton("✔ Cerrar orden", self._abrir_cerrar_orden)
+        barra.agregar_boton("📊  Generar reporte…", self._abrir_dialogo_reporte)
         barra.pack(fill="x", pady=(0, 8))
 
         contenedor_tabla = ttk.Frame(cuerpo)
@@ -115,6 +116,10 @@ class VistaProduccion(ttk.Frame):
 
         VentanaCerrarOrden(self, orden_id, al_guardar=self.refrescar)
 
+
+    def _abrir_dialogo_reporte(self):
+        from app.ui.dialogo_reporte import DialogoReporte
+        DialogoReporte(self.winfo_toplevel(), modulo="produccion")
 
 class VentanaNuevaOrdenProduccion(tk.Toplevel):
     def __init__(self, parent, al_guardar):

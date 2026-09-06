@@ -47,6 +47,7 @@ class VistaInventario(ttk.Frame):
         notebook.add(pestana, text="Stock Actual")
 
         barra = BarraBusqueda(pestana, al_escribir=lambda t: self.tabla_stock.filtrar(t))
+        barra.agregar_boton("📊  Generar reporte…", self._abrir_dialogo_reporte)
         barra.pack(fill="x", pady=(0, 8))
 
         contenedor = ttk.Frame(pestana)
@@ -201,6 +202,10 @@ class VistaInventario(ttk.Frame):
     def _abrir_nuevo_producto(self):
         VentanaProducto(self, al_guardar=self.refrescar)
 
+
+    def _abrir_dialogo_reporte(self):
+        from app.ui.dialogo_reporte import DialogoReporte
+        DialogoReporte(self.winfo_toplevel(), modulo="stock")
 
 class VentanaAjusteStock(tk.Toplevel):
     def __init__(self, parent, lote_id, al_guardar):

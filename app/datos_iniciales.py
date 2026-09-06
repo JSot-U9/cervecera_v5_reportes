@@ -481,4 +481,16 @@ def cargar_datos_iniciales():
     # Capital inicial de referencia
     establecer_parametro("capital_inicial", "25000.00")
 
+    # ── Datos de la empresa ──────────────────────────────────────────
+    # Estos valores aparecen en los reportes (PDF, Excel) y en el
+    # título de la ventana. El admin puede editarlos desde
+    # Administración → Empresa sin necesidad de tocar el código.
+    establecer_parametro("empresa_nombre",    "Cervecería del Valle Sagrado")
+    establecer_parametro("empresa_ruc",       "20123456789")
+    establecer_parametro("empresa_direccion", "Av. Tullumayo 234, Wanchaq")
+    establecer_parametro("empresa_telefono",  "+51 84 223344")
+    establecer_parametro("empresa_email",     "contacto@cerveceria-vallsagrado.pe")
+    establecer_parametro("empresa_ciudad",    "Cusco, Perú")
+    establecer_parametro("empresa_web",       "www.cerveceria-vallsagrado.pe")
+
     print("[datos_iniciales] Base de datos inicializada con datos completos de ejemplo.")

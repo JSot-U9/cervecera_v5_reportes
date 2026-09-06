@@ -220,33 +220,89 @@ NOMBRES_LEGIBLES = {
 #  EXPORTADORES
 # ══════════════════════════════════════════════════════════════════
 
-def guardar_pdf(datos: dict, ruta: Path) -> Path:
-    """Genera un PDF con los datos del reporte y lo guarda en ruta."""
-    ruta = Path(ruta)
+def guardar_pdf(datos: dict, ruta) -> object:
+    """Genera un PDF con los datos del reporte.
+
+    ruta puede ser un Path/str (guarda en disco) o un io.BytesIO
+    (escribe en memoria).  Devuelve ruta tal cual se recibió.
+    """
+    import io as _io
+    from app.logica_configuracion import obtener_datos_empresa
+    emp = obtener_datos_empresa()
+
+    _es_buffer = isinstance(ruta, _io.IOBase)
+    if not _es_buffer:
+        ruta = Path(ruta)
+    destino = ruta if _es_buffer else str(ruta)
     orientacion = landscape(A4) if datos.get("orientacion") == "landscape" else A4
     doc = SimpleDocTemplate(
-        str(ruta), pagesize=orientacion,
+        destino, pagesize=orientacion,
         leftMargin=1.5*cm, rightMargin=1.5*cm,
         topMargin=1.5*cm, bottomMargin=1.5*cm,
     )
 
     base = getSampleStyleSheet()
     est = {
-        "titulo": ParagraphStyle("titulo", parent=base["Title"],
-                                 textColor=_VERDE_OSCURO, fontSize=18, spaceAfter=4),
-        "subtitulo": ParagraphStyle("subtitulo", parent=base["Normal"],
-                                    textColor=_TEXTO_SEC, fontSize=10, spaceAfter=2),
-        "seccion": ParagraphStyle("seccion", parent=base["Heading2"],
-                                  textColor=_LEATHER, fontSize=11, spaceBefore=12, spaceAfter=6),
+        "empresa_nombre": ParagraphStyle(
+            "empresa_nombre", parent=base["Normal"],
+            textColor=_BLANCO, fontSize=15, fontName="Helvetica-Bold",
+            leading=18,
+        ),
+        "empresa_detalle": ParagraphStyle(
+            "empresa_detalle", parent=base["Normal"],
+            textColor=colors.HexColor("#E9E2C6"), fontSize=8,
+            leading=12,
+        ),
+        "subtitulo": ParagraphStyle(
+            "subtitulo", parent=base["Normal"],
+            textColor=_TEXTO_SEC, fontSize=10, spaceAfter=2,
+        ),
+        "seccion": ParagraphStyle(
+            "seccion", parent=base["Heading2"],
+            textColor=_LEATHER, fontSize=11, spaceBefore=10, spaceAfter=4,
+        ),
     }
 
+    # ── Cabecera de empresa ──────────────────────────────────────────
+    # Tabla de dos columnas: bloque de datos (izq.) + franja decorativa (der.)
+    # La franja derecha es un rectángulo ámbar que da "peso" visual al encabezado.
+    bloque_datos = [
+        Paragraph(emp["empresa_nombre"].upper(), est["empresa_nombre"]),
+        Spacer(1, 3),
+        Paragraph(
+            f"RUC {emp['empresa_ruc']}  ·  {emp['empresa_direccion']}  ·  {emp['empresa_ciudad']}",
+            est["empresa_detalle"],
+        ),
+        Paragraph(
+            f"Tel. {emp['empresa_telefono']}  ·  {emp['empresa_email']}"
+            + (f"  ·  {emp['empresa_web']}" if emp["empresa_web"] else ""),
+            est["empresa_detalle"],
+        ),
+    ]
+
+    ancho_total = doc.width
+    cabecera = Table(
+        [[bloque_datos, ""]],
+        colWidths=[ancho_total * 0.80, ancho_total * 0.20],
+    )
+    cabecera.setStyle(TableStyle([
+        ("BACKGROUND",   (0, 0), (0, 0), _VERDE_OSCURO),
+        ("BACKGROUND",   (1, 0), (1, 0), _LEATHER),
+        ("VALIGN",       (0, 0), (-1, -1), "MIDDLE"),
+        ("LEFTPADDING",  (0, 0), (0, 0), 14),
+        ("RIGHTPADDING", (0, 0), (0, 0), 10),
+        ("TOPPADDING",   (0, 0), (-1, -1), 12),
+        ("BOTTOMPADDING",(0, 0), (-1, -1), 12),
+    ]))
+
+    ahora = datetime.now().strftime("%d/%m/%Y %H:%M")
     historia = [
-        Paragraph("CERVECERÍA DEL VALLE SAGRADO", est["titulo"]),
-        Paragraph("Cusco, Perú", est["subtitulo"]),
-        HRFlowable(width="100%", thickness=2, color=_LEATHER, spaceAfter=6),
+        cabecera,
+        Spacer(1, 0.25*cm),
+        HRFlowable(width="100%", thickness=1.5, color=_LEATHER, spaceAfter=4),
         Paragraph(datos["titulo"].upper(), est["seccion"]),
-        Paragraph(f"Fecha: {date.today().strftime('%d/%m/%Y')}", est["subtitulo"]),
-        Spacer(1, 0.3*cm),
+        Paragraph(f"Generado el {ahora}", est["subtitulo"]),
+        Spacer(1, 0.25*cm),
     ]
 
     # KPIs
@@ -288,11 +344,14 @@ def guardar_pdf(datos: dict, ruta: Path) -> Path:
     historia.append(t)
 
     # Pie
-    ahora = datetime.now().strftime("%d/%m/%Y %H:%M")
     historia += [
         Spacer(1, 0.4*cm),
         HRFlowable(width="100%", thickness=0.5, color=_GRIS_LINEA),
-        Paragraph(f"Reporte generado el {ahora} por el Sistema de Gestión.", est["subtitulo"]),
+        Paragraph(
+            f"Documento generado automáticamente por el sistema de gestión de "
+            f"{emp['empresa_nombre']} — {emp['empresa_ciudad']}.",
+            est["subtitulo"],
+        ),
     ]
 
     doc.build(historia)
@@ -301,19 +360,23 @@ def guardar_pdf(datos: dict, ruta: Path) -> Path:
 
 def guardar_xlsx(datos: dict, ruta: Path) -> Path:
     """Genera un archivo Excel (.xlsx) con los datos del reporte."""
+    from app.logica_configuracion import obtener_datos_empresa
+    emp = obtener_datos_empresa()
+
     ruta = Path(ruta)
     wb = Workbook()
     ws = wb.active
     ws.title = datos["titulo"][:31]  # Excel limita a 31 chars
 
     # Estilos
-    fill_header  = PatternFill("solid", fgColor=_XL_VERDE)
-    fill_kpi_hdr = PatternFill("solid", fgColor=_XL_AMBER)
-    fill_alt     = PatternFill("solid", fgColor=_XL_SEPIA)
-    font_hdr     = Font(bold=True, color="FFFFFF", size=10)
-    font_kpi_lbl = Font(bold=True, color=_XL_VERDE, size=10)
-    font_title   = Font(bold=True, color=_XL_VERDE, size=14)
-    border_thin  = Border(
+    fill_header   = PatternFill("solid", fgColor=_XL_VERDE)
+    fill_kpi_hdr  = PatternFill("solid", fgColor=_XL_AMBER)
+    fill_alt      = PatternFill("solid", fgColor=_XL_SEPIA)
+    fill_empresa  = PatternFill("solid", fgColor=_XL_VERDE)
+    fill_franja   = PatternFill("solid", fgColor=_XL_AMBER)
+    font_hdr      = Font(bold=True, color="FFFFFF", size=10)
+    font_kpi_lbl  = Font(bold=True, color=_XL_VERDE, size=10)
+    border_thin   = Border(
         bottom=Side(style="thin", color="E5D6B3"),
         right=Side(style="thin",  color="E5D6B3"),
     )
@@ -323,30 +386,56 @@ def guardar_xlsx(datos: dict, ruta: Path) -> Path:
     ncols = len(datos["columnas"])
     col_fin = get_column_letter(max(ncols, 2))
 
-    # Fila 1: título empresa
+    # ── Cabecera de empresa (filas 1-4) ──────────────────────────────
+    # Fila 1: nombre de la empresa sobre fondo verde oscuro
     ws.merge_cells(f"A1:{col_fin}1")
     c = ws["A1"]
-    c.value = "CERVECERÍA DEL VALLE SAGRADO — Cusco, Perú"
-    c.font  = font_title
-    c.alignment = alin_centro
-    ws.row_dimensions[1].height = 22
+    c.value     = emp["empresa_nombre"].upper()
+    c.font      = Font(bold=True, color="FFFFFF", size=14)
+    c.fill      = fill_empresa
+    c.alignment = alin_izq
+    c.alignment = Alignment(horizontal="left", vertical="center",
+                             indent=1, wrap_text=False)
+    ws.row_dimensions[1].height = 26
 
-    # Fila 2: título reporte
+    # Fila 2: RUC + dirección
     ws.merge_cells(f"A2:{col_fin}2")
     c = ws["A2"]
-    c.value = datos["titulo"].upper()
-    c.font  = Font(bold=True, color=_XL_AMBER, size=11)
-    c.alignment = alin_centro
-    ws.row_dimensions[2].height = 18
+    c.value     = f"RUC {emp['empresa_ruc']}  ·  {emp['empresa_direccion']}  ·  {emp['empresa_ciudad']}"
+    c.font      = Font(color="E9E2C6", size=9)
+    c.fill      = fill_empresa
+    c.alignment = Alignment(horizontal="left", vertical="center", indent=1)
+    ws.row_dimensions[2].height = 16
 
-    # Fila 3: fecha
+    # Fila 3: teléfono + email + web
+    web_txt = f"  ·  {emp['empresa_web']}" if emp["empresa_web"] else ""
     ws.merge_cells(f"A3:{col_fin}3")
     c = ws["A3"]
-    c.value = f"Fecha: {date.today().strftime('%d/%m/%Y')}"
-    c.font  = Font(color="74795A", size=9)
-    c.alignment = alin_centro
+    c.value     = f"Tel. {emp['empresa_telefono']}  ·  {emp['empresa_email']}{web_txt}"
+    c.font      = Font(color="E9E2C6", size=9)
+    c.fill      = fill_empresa
+    c.alignment = Alignment(horizontal="left", vertical="center", indent=1)
+    ws.row_dimensions[3].height = 16
 
-    fila_cursor = 5
+    # Fila 4: título del reporte sobre fondo ámbar
+    ws.merge_cells(f"A4:{col_fin}4")
+    c = ws["A4"]
+    c.value     = datos["titulo"].upper()
+    c.font      = Font(bold=True, color="FFFFFF", size=11)
+    c.fill      = fill_franja
+    c.alignment = alin_centro
+    ws.row_dimensions[4].height = 20
+
+    # Fila 5: fecha de generación
+    ahora = datetime.now().strftime("%d/%m/%Y %H:%M")
+    ws.merge_cells(f"A5:{col_fin}5")
+    c = ws["A5"]
+    c.value     = f"Generado el {ahora}"
+    c.font      = Font(color="74795A", size=9, italic=True)
+    c.alignment = alin_centro
+    ws.row_dimensions[5].height = 14
+
+    fila_cursor = 7  # dejamos una fila vacía (6) como separador visual
 
     # KPIs
     if datos.get("kpis"):
@@ -416,10 +505,21 @@ def guardar_xlsx(datos: dict, ruta: Path) -> Path:
 
 def guardar_csv(datos: dict, ruta: Path) -> Path:
     """Genera un archivo CSV con los datos del reporte."""
+    from app.logica_configuracion import obtener_datos_empresa
+    emp = obtener_datos_empresa()
+
     ruta = Path(ruta)
+    ahora = datetime.now().strftime("%d/%m/%Y %H:%M")
     with open(ruta, "w", newline="", encoding="utf-8-sig") as f:
         writer = csv.writer(f)
-        writer.writerow([datos["titulo"], f"Fecha: {date.today().strftime('%d/%m/%Y')}"])
+        writer.writerow([emp["empresa_nombre"],
+                         f"RUC {emp['empresa_ruc']}",
+                         emp["empresa_ciudad"]])
+        writer.writerow([emp["empresa_direccion"],
+                         emp["empresa_telefono"],
+                         emp["empresa_email"]])
+        writer.writerow([])
+        writer.writerow([datos["titulo"], f"Generado: {ahora}"])
         writer.writerow([])
         if datos.get("kpis"):
             writer.writerow(["INDICADOR", "VALOR"])
@@ -428,8 +528,6 @@ def guardar_csv(datos: dict, ruta: Path) -> Path:
             writer.writerow([])
         writer.writerow(datos["columnas"])
         writer.writerows(datos["filas"])
-        writer.writerow([])
-        writer.writerow([f"Generado: {datetime.now().strftime('%d/%m/%Y %H:%M')}"])
     return ruta
 
 
