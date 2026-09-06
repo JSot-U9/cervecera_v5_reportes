@@ -19,7 +19,8 @@ tiene una pantalla se puede pensar en 3 capas:
 ┌─────────────────▼─────────────────────┐
 │   LÓGICA DE NEGOCIO                   │   → archivos logica_*.py
 │   "¿Qué reglas tiene el negocio?"     │
-│   (ej: FIFO, RBAC, cálculo de costos) │
+│   (ej: FIFO, RBAC, cálculo de costos, │
+│    generación de reportes PDF/Excel)  │
 └─────────────────┬─────────────────────┘
                   │  usa objetos de...
 ┌─────────────────▼─────────────────────┐
@@ -30,8 +31,7 @@ tiene una pantalla se puede pensar en 3 capas:
 
 Este proyecto usa **exactamente esas 3 capas, ni una más**. La versión
 anterior (con PySide6) tenía 4 capas (Vista → Service → Repository →
-Model), y la capa "Repository" usaba *generics* de Python (`TypeVar`,
-`Generic[T]`) — una herramienta muy potente, pero también uno de los
+Model), y la capa "Repository" usaba *generics* de Python (`TypeVar`, `Generic[T]`) — una herramienta muy potente, pero también uno de los
 conceptos que más cuesta entender cuando se está aprendiendo. Aquí se
 eliminó esa capa: las funciones de `logica_*.py` hablan DIRECTAMENTE
 con la base de datos usando SQLAlchemy. Una capa menos que aprender,
@@ -39,8 +39,7 @@ una capa menos que mantener.
 
 ## 2. ¿Por qué un archivo `logica_X.py` por módulo, y no clases?
 
-En vez de una clase `CompraService` con métodos, `logica_compras.py`
-tiene funciones sueltas: `registrar_compra()`, `listar_ordenes_compra()`, etc.
+En vez de una clase `CompraService` con métodos, `logica_compras.py` tiene funciones sueltas: `registrar_compra()`, `listar_ordenes_compra()`, etc.
 
 ¿Por qué? Porque estas funciones no necesitan "recordar" nada entre
 llamadas (no tienen estado propio) — cada una abre su sesión de base
@@ -49,6 +48,11 @@ guardar estado, usar una función simple es más fácil de leer que
 crear una clase solo para agrupar métodos. Si en algún momento sientes
 que `logica_X.py` te resulta más natural como clase, siéntete libre
 de convertirlo — pero probablemente no lo necesites.
+
+Esto aplica también a `logica_reportes.py`: sus funciones reciben
+parámetros de filtro (fechas, tipo de reporte), consultan la base de
+datos y devuelven los datos listos para ser formateados — sin guardar
+estado entre llamadas.
 
 ## 3. ¿Por qué SQLAlchemy con `Column` y no con `Mapped[...]`?
 
@@ -97,12 +101,15 @@ Hay dos diccionarios:
 
 - `MODULOS_POR_ROL`: qué botones del menú lateral ve cada rol.
 - `ACCIONES_POR_ROL`: dentro de un módulo, qué puede hacer cada rol
-  (por ejemplo, "VENTAS" puede "crear" ventas, pero no "cerrar" órdenes
-  de producción).
+(por ejemplo, "VENTAS" puede "crear" ventas, pero no "cerrar" órdenes
+de producción).
 
 Si algún día necesitas un rol nuevo, o cambiar qué puede hacer un rol
 existente, **solo tienes que tocar `seguridad.py`** — ningún otro
 archivo necesita cambiar.
+
+El módulo de Reportes también respeta RBAC: solo los roles con acceso
+configurado en `MODULOS_POR_ROL` verán el botón de reportes en el menú.
 
 ## 6. El ciclo de vida de una orden de producción
 
@@ -144,45 +151,74 @@ Fíjate que `vista_ventas.py` NUNCA escribe código de SQLAlchemy
 directamente para guardar la venta — solo junta los datos que el
 usuario ingresó y se los pasa a `logica_ventas.registrar_venta()`.
 Esta separación es útil porque, si algún día cambias Tkinter por otra
-librería de interfaz gráfica, casi no tendrías que tocar los archivos
-`logica_*.py`.
+librería de interfaz gráfica, casi no tendrías que tocar los archivos `logica_*.py`.
 
-## 8. Cosas que se simplificaron a propósito
+## 8. El módulo de Reportes: cómo funciona
 
-| Se decidió...                                  | En vez de...                                    | Por qué |
-|--------------------------------------------------|--------------------------------------------------|---------|
-| Hash de contraseñas con `hashlib` (librería estándar) | Argon2 (librería externa)                        | Menos dependencias que instalar; PBKDF2 es un algoritmo real y ampliamente usado (es el que usa Django por defecto). |
-| Funciones sueltas en `logica_*.py`                | Clases `Service` + `Repository` genéricas          | Menos capas, menos conceptos avanzados (generics) que aprender. |
-| SQLAlchemy estilo `Column` clásico                | Estilo `Mapped[...]` (SQLAlchemy 2.0 typed)        | Es el estilo que más se enseña en tutoriales; más fácil de buscar ayuda. |
-| Tkinter (incluido con Python)                     | PySide6 (hay que instalarlo aparte)                 | No requiere instalar un framework de interfaz gráfica externo. |
-| Un archivo `modelos.py` con todas las tablas       | Un archivo por tabla                                | Para un proyecto de este tamaño, es más fácil encontrar todo en un solo lugar que saltar entre 9 archivos pequeños. Si el proyecto creciera mucho más, dividirlo volvería a tener sentido. |
+El módulo de reportes sigue exactamente el mismo patrón de 3 capas:
 
-## 9. Si quieres seguir practicando: ideas para extender el proyecto
+```
+vista_reportes.py
+  └─ el usuario elige tipo de reporte, rango de fechas y formato
+        │
+        ▼
+logica_reportes.py
+  └─ consulta la BD, arma el conjunto de datos y llama al generador
+        │
+        ├─► ReportLab  →  archivo .pdf
+        └─► openpyxl   →  archivo .xlsx
+```
 
-Estas son mejoras que NO están implementadas todavía, pero que puedes
-intentar tú mismo para practicar (de más fácil a más difícil):
+Hay dos tipos de exportación disponibles:
+
+- **PDF** (via `reportlab`): produce un documento con encabezado, tabla
+de datos y pie de página con la fecha de generación. Útil para imprimir
+o archivar.
+- **Excel** (via `openpyxl`): produce una hoja de cálculo lista para
+que el usuario aplique sus propios filtros y gráficos. Útil para
+análisis ad-hoc.
+
+Las funciones de `logica_reportes.py` devuelven los datos como listas
+de diccionarios — la misma estructura que va tanto al PDF como al Excel.
+Si en el futuro quisieras agregar un tercer formato (por ejemplo, CSV),
+solo habría que agregar una función generadora nueva; la consulta a la
+BD no cambia.
+
+## 9. Cosas que se simplificaron a propósito
+
+| Se decidió...                                          | En vez de...                                | Por qué                                                                                                                                                                                    |
+| ------------------------------------------------------ | ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Hash de contraseñas con `hashlib` (librería estándar)  | Argon2 (librería externa)                   | Menos dependencias que instalar; PBKDF2 es un algoritmo real y ampliamente usado (es el que usa Django por defecto).                                                                       |
+| Funciones sueltas en `logica_*.py`                     | Clases `Service` + `Repository` genéricas   | Menos capas, menos conceptos avanzados (generics) que aprender.                                                                                                                            |
+| SQLAlchemy estilo `Column` clásico                     | Estilo `Mapped[...]` (SQLAlchemy 2.0 typed) | Es el estilo que más se enseña en tutoriales; más fácil de buscar ayuda.                                                                                                                   |
+| Tkinter (incluido con Python)                          | PySide6 (hay que instalarlo aparte)         | No requiere instalar un framework de interfaz gráfica externo.                                                                                                                             |
+| Un archivo `modelos.py` con todas las tablas           | Un archivo por tabla                        | Para un proyecto de este tamaño, es más fácil encontrar todo en un solo lugar que saltar entre 9 archivos pequeños. Si el proyecto creciera mucho más, dividirlo volvería a tener sentido. |
+| ReportLab + openpyxl para reportes                     | Matplotlib embebido en Tkinter              | Separar la generación del reporte de la interfaz gráfica es más simple: el usuario descarga el archivo y lo abre con el visor que prefiera.                                               |
+
+## 10. Ideas para seguir extendiendo el proyecto
+
+Estas son mejoras que puedes intentar tú mismo para practicar
+(de más fácil a más difícil):
 
 1. **Editar productos existentes** (hoy solo se pueden crear, no editar).
 2. **Historial de compras/ventas por cliente o proveedor** (un filtro
-   en la pestaña de órdenes).
-3. **Exportar el resumen de costos a un archivo CSV** (busca
-   `csv.writer` en la documentación de Python).
-4. **Reportes con gráficos** (por ejemplo, con la librería `matplotlib`,
-   un gráfico de barras de ventas por mes).
+en la pestaña de órdenes).
+3. **Más tipos de reporte** (por ejemplo, un reporte de mermas o un
+resumen de compras por proveedor) — la estructura de `logica_reportes.py`
+ya está lista para agregar nuevas consultas.
+4. **Reporte con gráficos incrustados en el PDF** (ReportLab soporta
+gráficos de barras nativamente con `reportlab.graphics.charts`).
 5. **Notificaciones automáticas** cuando un producto queda por debajo
-   del stock mínimo (ya existe la función `productos_bajo_minimo()`
-   en `logica_inventario.py` — solo falta decidir cómo avisar).
+del stock mínimo (ya existe la función `productos_bajo_minimo()` en
+`logica_inventario.py` — solo falta decidir cómo avisar).
 
-## 10. ¿Y de dónde salen los colores?
+## 11. ¿Y de dónde salen los colores?
 
 Todo el color de la aplicación (el ámbar del menú, el marrón del
-sidebar, el rojo de las alertas...) vive en **un solo archivo**:
-`app/ui/estilos.py`. Cada pantalla no define sus propios colores;
-en vez de eso, usa "estilos con nombre" (por ejemplo,
-`style="Sidebar.TButton"`) que apuntan a los colores definidos ahí.
+sidebar, el rojo de las alertas...) vive en **un solo archivo**: `app/ui/estilos.py`. Cada pantalla no define sus propios colores;
+en vez de eso, usa "estilos con nombre" (por ejemplo, `style="Sidebar.TButton"`) que apuntan a los colores definidos ahí.
 
 Si quieres cambiar el tema completo de la app (por ejemplo, probar
 con un verde en vez del ámbar), solo tienes que cambiar las
 constantes `COLOR_*` al principio de `estilos.py` — no hace falta
 tocar ninguna otra pantalla.
-
