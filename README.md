@@ -1,4 +1,4 @@
-# ERP Cervecería del Valle Sagrado — v2 (versión simplificada)
+# ERP Cervecería del Valle Sagrado — v5 (con módulo de reportes)
 
 Sistema de gestión (ERP) de escritorio para la Cervecería del Valle
 Sagrado (Cusco), escrito en **Python + Tkinter + SQLAlchemy**.
@@ -19,19 +19,22 @@ Compras  →  Inventario (por lotes, regla FIFO)  →  Producción (con receta)
                                               Costos (calculados solos)
                                                           ↑
                                                        Ventas
+                                                          ↓
+                                                     Reportes (PDF / Excel)
 ```
 
 Módulos incluidos:
 
-| Módulo       | Qué permite hacer                                              |
-|--------------|------------------------------------------------------------------|
-| Ingreso      | Login con usuario/contraseña, control de acceso por rol (RBAC)   |
-| Compras      | Registrar órdenes de compra a proveedores; actualiza el stock    |
-| Inventario   | Ver stock por producto, ver lotes (FIFO), historial, catálogo    |
-| Producción   | Crear/iniciar/cerrar órdenes de producción según una receta      |
-| Ventas       | Registrar ventas a clientes; descuenta stock automáticamente     |
-| Costos       | Ver el costo real y el margen de cada lote producido             |
-| Administración | Crear/desactivar/reactivar usuarios, asignar roles, ver historial de accesos (solo ADMIN) |
+| Módulo         | Qué permite hacer                                                                                        |
+| -------------- | -------------------------------------------------------------------------------------------------------- |
+| Ingreso        | Login con usuario/contraseña, control de acceso por rol (RBAC)                                           |
+| Compras        | Registrar órdenes de compra a proveedores; actualiza el stock                                            |
+| Inventario     | Ver stock por producto, ver lotes (FIFO), historial, catálogo                                            |
+| Producción     | Crear/iniciar/cerrar órdenes de producción según una receta                                              |
+| Ventas         | Registrar ventas a clientes; descuenta stock automáticamente                                             |
+| Costos         | Ver el costo real y el margen de cada lote producido                                                     |
+| Administración | Crear/desactivar/reactivar usuarios, asignar roles, ver historial de accesos (solo ADMIN)                |
+| Reportes       | Generar reportes de ventas, costos e inventario; exportar a **PDF** (ReportLab) y **Excel** (openpyxl)  |
 
 ## Instalación
 
@@ -44,7 +47,18 @@ source venv/bin/activate        # en Windows: venv\Scripts\activate
 
 # 2) Instalar las dependencias
 pip install -r requirements.txt
+```
 
+Las dependencias incluyen:
+
+| Paquete         | Para qué se usa                                      |
+| --------------- | ---------------------------------------------------- |
+| `SQLAlchemy`    | Conexión y ORM de la base de datos (SQLite)          |
+| `reportlab`     | Generación de reportes en formato PDF                |
+| `openpyxl`      | Exportación de datos a archivos Excel (.xlsx)        |
+| `pytest`        | Ejecución de las pruebas automáticas                 |
+
+```bash
 # 3) (Solo en Linux) si Tkinter no viene instalado con tu Python:
 sudo apt install python3-tk
 
@@ -63,22 +77,24 @@ referencia de S/ 15,000.
 
 ## Usuarios de prueba
 
-| Usuario     | Contraseña   | Rol         |
-|-------------|--------------|-------------|
-| admin       | admin123     | ADMIN (ve todo) |
-| compras     | compras123   | COMPRAS     |
-| inventario  | inv123       | INVENTARIO  |
-| produccion  | prod123      | PRODUCCION  |
-| ventas      | ventas123    | VENTAS      |
-| costos      | costos123    | COSTOS      |
+| Usuario    | Contraseña | Rol             |
+| ---------- | ---------- | --------------- |
+| admin      | admin123   | ADMIN (ve todo) |
+| compras    | compras123 | COMPRAS         |
+| inventario | inv123     | INVENTARIO      |
+| produccion | prod123    | PRODUCCION      |
+| ventas     | ventas123  | VENTAS          |
+| costos     | costos123  | COSTOS          |
 
 ## Notas de uso
 
-- Al registrar una compra, puedes indicar una **fecha de vencimiento**
-  por producto (formato `AAAA-MM-DD`, por ejemplo `2026-12-31`). Es
-  opcional: si se deja vacía, el lote queda sin fecha de vencimiento.
+- Al registrar una compra, puedes indicar una **fecha de vencimiento** por producto (formato `AAAA-MM-DD`, por ejemplo `2026-12-31`). Es
+opcional: si se deja vacía, el lote queda sin fecha de vencimiento.
 - **Ctrl+A** selecciona todo el texto dentro de cualquier campo de
-  texto o combobox del programa.
+texto o combobox del programa.
+- En el módulo de **Reportes**, puedes elegir el tipo de reporte
+(ventas, costos o inventario), aplicar filtros de fecha y exportar
+el resultado directamente a PDF o a Excel con un clic.
 
 ## Correr las pruebas automáticas
 
@@ -89,33 +105,33 @@ interfaz gráfica, que es difícil de probar de forma automática):
 pytest
 ```
 
-Si alguna vez modificas `logica_inventario.py`, `logica_compras.py`,
-`logica_ventas.py` o `logica_produccion.py`, vuelve a correr `pytest`
-para asegurarte de que no rompiste nada.
+Si alguna vez modificas `logica_inventario.py`, `logica_compras.py`, `logica_ventas.py`, `logica_produccion.py` o `logica_reportes.py`, vuelve a correr `pytest` para asegurarte de que no rompiste nada.
 
 ## Estructura del proyecto (resumen rápido)
 
 ```
-main.py                    → punto de entrada del programa
+main.py                      → punto de entrada del programa
 app/
-  basedatos.py              → conexión a la base de datos (SQLite)
-  modelos.py                 → todas las tablas (Usuario, Producto, etc.)
+  basedatos.py                → conexión a la base de datos (SQLite)
+  modelos.py                  → todas las tablas (Usuario, Producto, etc.)
   seguridad.py                → hash de contraseñas + permisos por rol
-  sesion.py                    → quién inició sesión ahora mismo
-  datos_iniciales.py            → datos de ejemplo para el primer arranque
-  logica_autenticacion.py        → login, logout, crear usuarios
-  logica_compras.py               → registrar compras
-  logica_inventario.py             → lotes, movimientos, regla FIFO
-  logica_produccion.py              → crear/cerrar órdenes de producción
-  logica_ventas.py                   → registrar ventas
-  logica_costos.py                    → reportes de costos y márgenes
-  logica_configuracion.py              → parámetros sueltos (ej: capital inicial)
-  ui/                                  → todas las pantallas (Tkinter)
-    estilos.py                          → paleta de colores y estilos ttk (un solo lugar)
-    logo.py                              → carga el logo de la empresa
-    assets/                               → imágenes (logo_grande.png, logo_chico.png)
+  sesion.py                   → quién inició sesión ahora mismo
+  datos_iniciales.py          → datos de ejemplo para el primer arranque
+  logica_autenticacion.py     → login, logout, crear usuarios
+  logica_compras.py           → registrar compras
+  logica_inventario.py        → lotes, movimientos, regla FIFO
+  logica_produccion.py        → crear/cerrar órdenes de producción
+  logica_ventas.py            → registrar ventas
+  logica_costos.py            → costo y margen de lotes producidos
+  logica_reportes.py          → generar datos para reportes; exportar PDF y Excel
+  logica_configuracion.py     → parámetros sueltos (ej: capital inicial)
+  ui/                         → todas las pantallas (Tkinter)
+    estilos.py                → paleta de colores y estilos ttk (un solo lugar)
+    logo.py                   → carga el logo de la empresa
+    vista_reportes.py         → pantalla de reportes y botones de exportación
+    assets/                   → imágenes (logo_grande.png, logo_chico.png)
 tests/
-  test_logica.py                       → pruebas automáticas
+  test_logica.py              → pruebas automáticas
 ```
 
 Para el detalle de POR QUÉ está organizado así, ver `GUIA_ARQUITECTURA.md`.
