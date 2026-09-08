@@ -1,15 +1,10 @@
 """
 vista_costos.py
 ================
-Módulo de Costos: análisis de costos y márgenes por lote de producción.
-
-Vista de solo lectura: los costos se calculan automáticamente al cerrar
-cada orden de producción.
-
-El botón «Reportes» abre el DialogoReporte, donde el usuario puede:
-  - elegir el tipo de reporte y el formato (PDF / XLSX / CSV)
-  - ver una vista previa de los datos
-  - guardar el archivo en la ruta que prefiera
+Módulo de Costos — mejoras UX:
+- KPIs con iconos y variantes de color
+- Formato monetario consistente S/ X,XXX.XX
+- Encabezado simplificado
 """
 
 from tkinter import ttk
@@ -23,8 +18,9 @@ class VistaCostos(ttk.Frame):
         super().__init__(parent)
         EncabezadoModulo(
             self,
-            "Módulo de Costos",
-            "Análisis de costos reales y márgenes de ganancia por cada lote de producción cerrado",
+            "Costos",
+            "Análisis de costos reales y márgenes de ganancia por lote de producción cerrado",
+            icono="📊",
         ).pack(fill="x")
 
         cuerpo = ttk.Frame(self, padding=12)
@@ -32,18 +28,26 @@ class VistaCostos(ttk.Frame):
 
         # ── KPIs ────────────────────────────────────────────────
         fila_kpis = ttk.Frame(cuerpo)
-        fila_kpis.pack(fill="x", pady=(0, 10))
-        self.kpi_costo_total     = TarjetaKPI(fila_kpis, "Costo total acumulado (S/)")
-        self.kpi_margen_prom     = TarjetaKPI(fila_kpis, "Margen de ganancia promedio (%)")
-        self.kpi_costo_unit_prom = TarjetaKPI(fila_kpis, "Costo unitario promedio (S/)")
-        self.kpi_n_lotes         = TarjetaKPI(fila_kpis, "Lotes de producción costeados")
-        for tarjeta in (self.kpi_costo_total, self.kpi_margen_prom,
-                        self.kpi_costo_unit_prom, self.kpi_n_lotes):
-            tarjeta.pack(side="left", fill="x", expand=True, padx=4)
+        fila_kpis.pack(fill="x", pady=(0, 12))
+        fila_kpis.columnconfigure((0, 1, 2, 3), weight=1)
 
-        # ── Barra con búsqueda y botón de reportes ──────────────
-        barra = BarraBusqueda(cuerpo, al_escribir=lambda t: self.tabla.filtrar(t))
-        barra.agregar_boton("📊  Generar reporte…", self._abrir_dialogo_reporte)
+        self.kpi_costo_total     = TarjetaKPI(fila_kpis, "Costo total acumulado",
+                                               variante="alerta", icono="💸")
+        self.kpi_margen_prom     = TarjetaKPI(fila_kpis, "Margen de ganancia promedio",
+                                               variante="exito", icono="📈")
+        self.kpi_costo_unit_prom = TarjetaKPI(fila_kpis, "Costo unitario promedio",
+                                               icono="🔢")
+        self.kpi_n_lotes         = TarjetaKPI(fila_kpis, "Lotes de producción costeados",
+                                               icono="🍺")
+        for i, t in enumerate((self.kpi_costo_total, self.kpi_margen_prom,
+                                self.kpi_costo_unit_prom, self.kpi_n_lotes)):
+            t.grid(row=0, column=i, sticky="nsew", padx=4)
+
+        # ── Barra búsqueda + reporte ───────────────────────────
+        barra = BarraBusqueda(cuerpo, al_escribir=lambda t: self.tabla.filtrar(t),
+                               placeholder="🔎  Buscar lote, producto...")
+        barra.agregar_boton("📊  Reporte", self._abrir_dialogo_reporte,
+                             estilo="AccionSecundaria.TButton")
         barra.pack(fill="x", pady=(0, 8))
 
         # ── Tabla de costos ──────────────────────────────────────
@@ -52,11 +56,17 @@ class VistaCostos(ttk.Frame):
         self.tabla = TablaDatos(
             contenedor_tabla,
             [
-                "N° de Orden de Producción", "N° de Lote", "Producto Elaborado",
-                "Cantidad (L)", "Costo Insumos (S/)", "Costo M.O. (S/)",
-                "Costos Indirectos (S/)", "Costo Total (S/)",
-                "Costo Unitario (S/)", "Margen de Ganancia (%)",
+                "N° Orden", "N° Lote", "Producto",
+                "Cantidad (L)", "Insumos (S/)", "M.O. (S/)",
+                "Indirectos (S/)", "Total (S/)",
+                "Unit. (S/)", "Margen (%)",
             ],
+            anchos={
+                "N° Orden": 95, "N° Lote": 110, "Producto": 160,
+                "Cantidad (L)": 90, "Insumos (S/)": 100, "M.O. (S/)": 90,
+                "Indirectos (S/)": 100, "Total (S/)": 100,
+                "Unit. (S/)": 90, "Margen (%)": 90,
+            },
         )
         self.tabla.empaquetar()
 

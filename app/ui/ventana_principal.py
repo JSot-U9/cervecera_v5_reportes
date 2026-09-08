@@ -1,17 +1,11 @@
 """
 ventana_principal.py
 =====================
-La ventana principal tiene dos partes:
-
-  - Un menú lateral (izquierda) con un botón por cada módulo que el
-    usuario actual tiene permiso de ver (según su rol).
-  - Un área de contenido (derecha) que muestra la pantalla del
-    módulo seleccionado.
-
-Navegación: TODAS las pantallas se crean una sola vez al arrancar y
-se "apilan" unas sobre otras con .place(). Al hacer clic en un botón
-del menú se trae al frente (tkraise) la pantalla correspondiente y se
-llama a su método refrescar() para mostrar datos actualizados.
+Ventana principal del ERP con sidebar mejorado:
+- Estado activo persistente (no solo hover)
+- Información de usuario/rol en la parte inferior
+- Barra de estado inferior
+- Etiquetas simplificadas de módulos
 """
 
 import tkinter as tk
@@ -21,8 +15,10 @@ from app.sesion import sesion_actual
 from app.seguridad import modulos_visibles
 from app.logica_autenticacion import cerrar_sesion
 from app.logica_configuracion import obtener_parametro
-from app.ui.estilos import aplicar_estilos
+from app.ui.estilos import aplicar_estilos, COLOR_SIDEBAR, COLOR_PRIMARIO, COLOR_SIDEBAR_SELECCIONADO
 from app.ui.logo import cargar_logo
+from app.ui.widgets import BarraEstado
+from app.ui.dialogo_creditos import mostrar_creditos
 
 from app.ui.vista_dashboard import VistaDashboard
 from app.ui.vista_compras import VistaCompras
@@ -32,15 +28,15 @@ from app.ui.vista_ventas import VistaVentas
 from app.ui.vista_costos import VistaCostos
 from app.ui.vista_admin import VistaAdmin
 
-# Definición de todos los módulos: (clave interna, texto del botón, clase de la vista)
+# Módulos: (clave, ícono, etiqueta, clase)
 DEFINICION_MODULOS = [
-    ("dashboard",  "🏠  Inicio",                 VistaDashboard),
-    ("compras",    "🛒  Módulo de Compras",       VistaCompras),
-    ("inventario", "📦  Módulo de Inventario",    VistaInventario),
-    ("produccion", "🍺  Módulo de Producción",    VistaProduccion),
-    ("ventas",     "💰  Módulo de Ventas",        VistaVentas),
-    ("costos",     "📊  Módulo de Costos",        VistaCostos),
-    ("admin",      "⚙️   Administración",          VistaAdmin),
+    ("dashboard",  "🏠", "Inicio",         VistaDashboard),
+    ("compras",    "🛒", "Compras",         VistaCompras),
+    ("inventario", "📦", "Inventario",      VistaInventario),
+    ("produccion", "🍺", "Producción",      VistaProduccion),
+    ("ventas",     "💰", "Ventas",          VistaVentas),
+    ("costos",     "📊", "Costos",          VistaCostos),
+    ("admin",      "⚙️", "Administración",  VistaAdmin),
 ]
 
 
@@ -48,84 +44,118 @@ class VentanaPrincipal(tk.Tk):
     def __init__(self):
         super().__init__()
 
-        # Nombre de la empresa viene de la base de datos, no hardcodeado.
-        # Si el admin cambia el nombre desde la pestaña Empresa, el título
-        # se actualizará la próxima vez que se inicie sesión.
-        self._nombre_empresa = obtener_parametro(
-            "empresa_nombre", "Sistema de Gestión"
-        )
-
+        self._nombre_empresa = obtener_parametro("empresa_nombre", "Sistema de Gestión")
         self.title(
             f"{self._nombre_empresa}  —  "
             f"{sesion_actual.nombre_completo} [{sesion_actual.rol}]"
         )
-        self.geometry("1200x720")
-        self.minsize(980, 620)
+        self.geometry("1280x760")
+        self.minsize(1000, 640)
         aplicar_estilos(self)
 
-        self.quiere_reiniciar_login = False  # True si el usuario cerró sesión (no la app)
-
+        self.quiere_reiniciar_login = False
         self._modulos_permitidos = modulos_visibles(sesion_actual.rol)
-        self._botones_menu = {}
-        self._vistas = {}
+        self._botones_menu: dict[str, ttk.Button] = {}
+        self._vistas: dict = {}
+        self._clave_activa: str = ""
 
+        # Atajos de teclado globales
+        self.bind("<F5>", lambda e: self._refrescar_activo())
+
+        # Layout principal: sidebar | contenido
         contenedor_principal = ttk.Frame(self)
         contenedor_principal.pack(fill="both", expand=True)
 
-        self._crear_menu_lateral(contenedor_principal)
+        self._crear_sidebar(contenedor_principal)
         self._area_contenido = ttk.Frame(contenedor_principal)
         self._area_contenido.pack(side="left", fill="both", expand=True)
+
+        # Barra de estado inferior
+        barra_estado = BarraEstado(
+            self,
+            usuario=sesion_actual.nombre_completo,
+            rol=sesion_actual.rol
+        )
+        barra_estado.pack(side="bottom", fill="x")
 
         self._crear_vistas()
         self._navegar("dashboard")
 
-    # ── Menú lateral ─────────────────────────────────────────────
-    def _crear_menu_lateral(self, parent):
-        menu = ttk.Frame(parent, width=220, padding=10, style="Sidebar.TFrame")
-        menu.pack(side="left", fill="y")
-        menu.pack_propagate(False)
+    # ── Sidebar ───────────────────────────────────────────────────
+    def _crear_sidebar(self, parent):
+        sidebar = ttk.Frame(parent, width=230, style="Sidebar.TFrame")
+        sidebar.pack(side="left", fill="y")
+        sidebar.pack_propagate(False)
 
-        tarjeta_logo = ttk.Frame(menu, style="Tarjeta.TFrame", padding=8)
-        tarjeta_logo.pack(pady=(0, 6))
+        # Logo y nombre de empresa
+        tarjeta_logo = ttk.Frame(sidebar, style="Tarjeta.TFrame", padding=(10, 10))
+        tarjeta_logo.pack(padx=12, pady=(12, 4), fill="x")
         self._imagen_logo_sidebar = cargar_logo(self, tamano="chico")
         ttk.Label(tarjeta_logo, image=self._imagen_logo_sidebar,
                   style="Tarjeta.TLabel").pack()
 
-        # Nombre de la empresa bajo el logo, en el propio sidebar (sin tarjeta).
-        # wraplength=180 evita que un nombre largo desborde el panel lateral.
         ttk.Label(
-            menu,
+            sidebar,
             text=self._nombre_empresa,
             style="SidebarTitulo.TLabel",
-            font=("Segoe UI", 9, "bold"),
-            wraplength=180,
+            wraplength=200,
             justify="center",
             anchor="center",
-        ).pack(pady=(0, 10), padx=6)
+        ).pack(pady=(4, 8), padx=8)
 
-        for clave, texto, _clase in DEFINICION_MODULOS:
+        # Separador
+        sep1 = tk.Frame(sidebar, bg="#3D4F28", height=1)
+        sep1.pack(fill="x", padx=12, pady=(0, 6))
+
+        # Botones de navegación
+        for clave, icono, etiqueta, _clase in DEFINICION_MODULOS:
             if clave not in self._modulos_permitidos:
                 continue
-            boton = ttk.Button(menu, text=texto, style="Sidebar.TButton",
-                                command=lambda c=clave: self._navegar(c))
-            boton.pack(fill="x", pady=2)
+            texto = f"{icono}   {etiqueta}"
+            boton = ttk.Button(
+                sidebar,
+                text=texto,
+                style="Sidebar.TButton",
+                command=lambda c=clave: self._navegar(c)
+            )
+            boton.pack(fill="x", padx=8, pady=2)
             self._botones_menu[clave] = boton
 
-        relleno = ttk.Frame(menu, style="Sidebar.TFrame")
-        relleno.pack(fill="both", expand=True)
+        # Relleno flexible
+        ttk.Frame(sidebar, style="Sidebar.TFrame").pack(fill="both", expand=True)
 
-        ttk.Separator(menu, orient="horizontal", style="Sidebar.TSeparator").pack(
-            fill="x", pady=8)
-        ttk.Label(menu, text=sesion_actual.nombre_completo,
-                  style="SidebarTitulo.TLabel", font=("Segoe UI", 10, "bold")).pack(anchor="w")
-        ttk.Label(menu, text=sesion_actual.rol, style="Sidebar.TLabel").pack(
-            anchor="w", pady=(0, 8))
-        ttk.Button(menu, text="Cerrar sesión", style="Peligro.TButton",
-                   command=self._cerrar_sesion).pack(fill="x")
+        # Separador antes de usuario
+        sep2 = tk.Frame(sidebar, bg="#3D4F28", height=1)
+        sep2.pack(fill="x", padx=12, pady=8)
 
-    # ── Crear todas las vistas permitidas, una encima de otra ───
+        # Sección usuario
+        frame_usuario = ttk.Frame(sidebar, style="Sidebar.TFrame", padding=(12, 6))
+        frame_usuario.pack(fill="x")
+
+        ttk.Label(frame_usuario, text="👤  " + sesion_actual.nombre_completo,
+                  style="SidebarTitulo.TLabel",
+                  font=("Segoe UI", 9, "bold"),
+                  wraplength=190).pack(anchor="w")
+        ttk.Label(frame_usuario, text=sesion_actual.rol,
+                  style="SidebarRol.TLabel").pack(anchor="w", pady=(0, 6))
+
+        ttk.Button(
+            sidebar,
+            text="ℹ️  Créditos",
+            style="Secundario.TButton",
+            command=lambda: mostrar_creditos(self)
+        ).pack(fill="x", padx=8, pady=(0, 4))
+
+        ttk.Button(
+            sidebar,
+            text="🚪  Cerrar sesión",
+            style="Peligro.TButton",
+            command=self._cerrar_sesion
+        ).pack(fill="x", padx=8, pady=(0, 10))
+
+    # ── Vistas ────────────────────────────────────────────────────
     def _crear_vistas(self):
-        for clave, _texto, clase_vista in DEFINICION_MODULOS:
+        for clave, _icono, _texto, clase_vista in DEFINICION_MODULOS:
             if clave not in self._modulos_permitidos:
                 continue
             vista = clase_vista(self._area_contenido)
@@ -135,9 +165,22 @@ class VentanaPrincipal(tk.Tk):
     def _navegar(self, clave: str):
         if clave not in self._vistas:
             return
+        # Restaurar estilo del botón anterior
+        if self._clave_activa and self._clave_activa in self._botones_menu:
+            self._botones_menu[self._clave_activa].configure(style="Sidebar.TButton")
+        # Marcar botón activo
+        if clave in self._botones_menu:
+            self._botones_menu[clave].configure(style="SidebarActivo.TButton")
+        self._clave_activa = clave
         self._vistas[clave].tkraise()
         if hasattr(self._vistas[clave], "refrescar"):
             self._vistas[clave].refrescar()
+
+    def _refrescar_activo(self):
+        if self._clave_activa and self._clave_activa in self._vistas:
+            vista = self._vistas[self._clave_activa]
+            if hasattr(vista, "refrescar"):
+                vista.refrescar()
 
     def _cerrar_sesion(self):
         cerrar_sesion()

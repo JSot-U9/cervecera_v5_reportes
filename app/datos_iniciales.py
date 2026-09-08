@@ -4,17 +4,42 @@ datos_iniciales.py
 Carga datos de ejemplo la PRIMERA vez que se ejecuta el programa.
 Si ya existen usuarios en la base de datos, esta función no hace nada.
 
-Tablas pobladas:
-  - Usuario            → 6  (uno por rol)
-  - Proveedor          → 8
-  - Producto (insumo)  → 13
-  - Producto (term.)   → 5
-  - Cliente            → 10
-  - Receta             → 5
-  - IngredienteReceta  → 17
-  - OrdenCompra / Lote / Movimiento  → 10 órdenes de compra
-  - OrdenProduccion / CostoProduccion → 10 órdenes (7 cerradas, 2 en proceso, 1 iniciada)
-  - OrdenVenta / DetalleVenta         → 15 ventas
+El archivo tiene DOS partes:
+
+  PARTE 1 — a mano, tal como en la versión original: 6 usuarios (uno
+  por rol, con las credenciales de prueba documentadas en el README),
+  8 proveedores, 13 insumos, 5 cervezas, 10 clientes, 5 recetas,
+  10 compras, 10 órdenes de producción y 15 ventas. Todo escrito
+  línea por línea, fácil de leer y de seguir con la vista.
+
+  PARTE 2 — generada por código: para tener un conjunto de datos de
+  prueba más grande (pensado para que CADA tabla del sistema tenga
+  al menos 50 filas) sin copiar y pegar decenas de líneas casi
+  iguales a mano. No son números al azar: los usuarios, proveedores,
+  insumos, cervezas y clientes se arman combinando listas de nombres
+  típicos de la zona; las recetas nuevas usan las MISMAS proporciones
+  (malta, lúpulo, levadura por litro) que ya se ven en las recetas
+  originales de la Parte 1; y las compras se calculan para que
+  siempre alcance el stock antes de fabricar y vender — igual que
+  tendría que hacerlo una persona registrando esto a mano, solo que
+  con un bucle en vez de repetir la misma llamada 40 veces.
+
+Tablas pobladas (Parte 1 + Parte 2):
+  - Usuario                          →  6 + 45 =  51
+  - Proveedor                        →  8 + 43 =  51
+  - Producto (insumo)                → 13 + 40 =  53
+  - Producto (producto terminado)    →  5 + 62 =  67
+  - Cliente                          → 10 + 43 =  53
+  - Receta                           →  5 + 62 =  67
+  - IngredienteReceta                → 17 + 62*9 = 575
+  - OrdenCompra / Lote / Movimiento  → 10 + 41 =  51
+  - OrdenProduccion / CostoProduccion / Merma → 10 + 62 = 72 órdenes,
+    de las cuales ~51 quedan CERRADAS (mismas proporciones que la
+    Parte 1: ~70% cerradas, ~20% en proceso, ~10% recién iniciadas) —
+    así CostoProduccion y Merma (que solo se crean al cerrar una
+    orden) también superan las 50 filas.
+  - OrdenVenta / DetalleVenta        → 15 + generadas dinámicamente
+    según el stock real disponible después de cada producción (≥60 más)
 """
 
 from app.basedatos import nueva_sesion
@@ -26,7 +51,431 @@ from app.logica_configuracion import establecer_parametro
 from app.logica_compras import registrar_compra
 from app.logica_produccion import crear_orden, iniciar_proceso, cerrar_orden
 from app.logica_ventas import registrar_venta
+from app.logica_inventario import stock_total
 
+
+# ══════════════════════════════════════════════════════════════════
+#  PARTE 2 — bancos de nombres y funciones generadoras
+# ══════════════════════════════════════════════════════════════════
+# Nada de esto son personas, empresas o productos reales: son listas
+# de nombres típicos de la región (Cusco / andinos) que se combinan
+# por índice para armar filas variadas sin escribirlas una por una.
+# Se combinan siempre con el mismo tipo de operación (i % len(lista),
+# con distintos multiplicadores para que no calcen todas en el mismo
+# patrón), así que el resultado es siempre el mismo en cada
+# instalación — no se usa la librería `random` a propósito, para que
+# el dato de ejemplo sea reproducible y fácil de depurar.
+# ══════════════════════════════════════════════════════════════════
+
+_NOMBRES = [
+    "Juan", "María", "Carlos", "Rosa", "Luis", "Ana", "Pedro", "Sofía",
+    "Miguel", "Elena", "Jorge", "Lucía", "Roberto", "Patricia", "Diego",
+    "Milagros", "Fernando", "Yolanda", "Ricardo", "Ximena", "Alberto",
+    "Gabriela", "Renzo", "Katherine", "Marco", "Adriana", "Raúl",
+    "Cecilia", "Iván", "Noelia",
+]
+_APELLIDOS = [
+    "Quispe", "Mamani", "Condori", "Huamán", "Ccoa", "Tupac", "Vargas",
+    "Flores", "Huanca", "Apaza", "Ccorimanya", "Salazar", "Puma",
+    "Choquehuanca", "Ttito", "Ramos", "Zúñiga", "Alvarez", "Pumayalli",
+    "Chávez", "Ancca", "Sallo", "Cusihuaman", "Machaca", "Yupanqui",
+    "Illatarco", "Suyo", "Achahui", "Quenaya", "Béjar",
+]
+_LUGARES_CUSCO = [
+    "Valle Sagrado", "Urubamba", "Ollantaytambo", "Pisac", "Chinchero",
+    "Anta", "Calca", "Paucartambo", "Quillabamba", "Espinar", "Canchis",
+    "Wanchaq", "San Jerónimo", "Poroy", "Písac", "Lamay", "Maras",
+    "Huayllabamba", "Yucay", "Santa Ana",
+]
+_FORMAS_LEGALES = ["S.A.C.", "E.I.R.L.", "S.R.L."]
+
+
+def _usuarios_adicionales():
+    """
+    Usuarios extra, más allá de las 6 cuentas de prueba documentadas
+    en el README (una por rol — esas NO se tocan). Reflejan una
+    empresa que ya creció: varias sucursales de ventas, más de un
+    almacén, más de un turno de producción. El login sigue el patrón
+    "<rol><número>" para no chocar con los logins fijos ("admin",
+    "compras", etc.) que sí están documentados.
+    """
+    plan = [
+        ("ADMIN", 1), ("COMPRAS", 5), ("INVENTARIO", 9),
+        ("PRODUCCION", 7), ("VENTAS", 16), ("COSTOS", 7),
+    ]
+    usuarios = []
+    i = 0
+    for rol, cantidad in plan:
+        for n in range(2, cantidad + 2):   # arranca en "02": "01" es la cuenta de prueba
+            nombre = _NOMBRES[i % len(_NOMBRES)]
+            apellido = _APELLIDOS[(i * 7 + 3) % len(_APELLIDOS)]
+            login = f"{rol.lower()}{n:02d}"
+            usuarios.append(Usuario(
+                usuario=login,
+                nombre_completo=f"{nombre} {apellido}",
+                rol=rol,
+                contrasena_hash=hash_contrasena(f"{login}123"),
+            ))
+            i += 1
+    return usuarios
+
+
+_RUBROS_PROVEEDOR = [
+    "Maltería", "Lupulera", "Levaduras y Fermentos", "Apícola",
+    "Frutas Deshidratadas", "Especias Andinas", "Insumos Químicos",
+    "Envases de Vidrio", "Etiquetas y Empaques", "Cartonería Industrial",
+    "Transportes", "Refrigeración Industrial", "Repuestos Industriales",
+    "Limpieza Industrial", "Gas Industrial", "Seguridad y EPP",
+    "Mantenimiento Eléctrico", "Control de Plagas", "Laboratorio y Análisis",
+    "Publicidad y Merchandising",
+]
+
+
+def _proveedores_adicionales(cantidad):
+    """Proveedores extra, uno por combinación de rubro + lugar + forma legal."""
+    proveedores = []
+    for i in range(cantidad):
+        rubro = _RUBROS_PROVEEDOR[i % len(_RUBROS_PROVEEDOR)]
+        lugar = _LUGARES_CUSCO[i % len(_LUGARES_CUSCO)]
+        forma = _FORMAS_LEGALES[i % len(_FORMAS_LEGALES)]
+        nombre = _NOMBRES[(i * 3) % len(_NOMBRES)]
+        apellido = _APELLIDOS[(i * 5 + 1) % len(_APELLIDOS)]
+        slug = rubro.lower().replace(" ", "")
+        proveedores.append(Proveedor(
+            razon_social=f"{rubro} {lugar} {forma}",
+            ruc=f"20{700000000 + i:09d}",
+            contacto=f"{nombre} {apellido}",
+            telefono=f"984{300000 + i:06d}",
+            email=f"contacto{i + 1}@{slug}.pe",
+        ))
+    return proveedores
+
+
+# ── Insumos nuevos: (slug, nombre, categoría, unidad, stock_mínimo) ──
+# La "categoría" es la que usan las funciones de más abajo para armar
+# recetas y compras coherentes (por ejemplo: todas las "lupulo" se
+# compran en kilos y en cantidades chicas; todas las "envase" se
+# compran por unidad y en cantidades grandes).
+_INSUMOS_ADICIONALES = [
+    ("malta_pilsner",   "Malta Pilsner",                       "malta",    "kg", 40),
+    ("malta_munich",    "Malta Munich",                        "malta",    "kg", 30),
+    ("malta_caramelo",  "Malta Caramelo 60L",                  "malta",    "kg", 15),
+    ("malta_chocolate", "Malta Chocolate",                     "malta",    "kg", 8),
+    ("malta_ahumada",   "Malta Ahumada",                       "malta",    "kg", 5),
+    ("copos_avena",     "Copos de avena",                      "malta",    "kg", 10),
+    ("copos_trigo",     "Copos de trigo",                      "malta",    "kg", 10),
+    ("lupulo_citra",      "Lúpulo Citra",                      "lupulo",   "kg", 3),
+    ("lupulo_centennial", "Lúpulo Centennial",                 "lupulo",   "kg", 3),
+    ("lupulo_saaz",       "Lúpulo Saaz",                       "lupulo",   "kg", 3),
+    ("lupulo_mosaic",     "Lúpulo Mosaic",                     "lupulo",   "kg", 3),
+    ("lupulo_simcoe",     "Lúpulo Simcoe",                     "lupulo",   "kg", 3),
+    ("lupulo_eldorado",   "Lúpulo El Dorado",                  "lupulo",   "kg", 3),
+    ("lupulo_amarillo",   "Lúpulo Amarillo",                   "lupulo",   "kg", 3),
+    ("lupulo_hallertau",  "Lúpulo Hallertau",                  "lupulo",   "kg", 3),
+    ("levadura_kveik",       "Levadura Kveik Voss",             "levadura", "g", 200),
+    ("levadura_us05",        "Levadura US-05",                  "levadura", "g", 500),
+    ("levadura_nottingham",  "Levadura Nottingham",             "levadura", "g", 500),
+    ("levadura_saison",      "Levadura Belle Saison",           "levadura", "g", 200),
+    ("levadura_weizen_alemana", "Levadura Wyeast 3068 (trigo alemán)", "levadura", "g", 200),
+    ("fresa_deshidratada",      "Fresas deshidratadas",         "especial", "kg", 3),
+    ("maracuya_deshidratado",   "Maracuyá deshidratado",        "especial", "kg", 3),
+    ("aguaymanto_deshidratado", "Aguaymanto deshidratado",      "especial", "kg", 3),
+    ("tumbo_deshidratado",      "Tumbo deshidratado",           "especial", "kg", 3),
+    ("jengibre_fresco",         "Jengibre fresco",              "especial", "kg", 2),
+    ("cafe_tostado",            "Café tostado en grano",        "especial", "kg", 5),
+    ("coco_rallado",            "Coco rallado tostado",         "especial", "kg", 3),
+    ("vainilla_vaina",          "Vainilla en vaina",            "especial", "kg", 1),
+    ("chips_roble",             "Chips de roble tostado",       "especial", "kg", 5),
+    ("botella_620",  "Botellas de vidrio ámbar 620ml",   "envase", "unidad", 500),
+    ("botella_330",  "Botellas de vidrio ámbar 330ml",   "envase", "unidad", 500),
+    ("lata_355",     "Latas de aluminio 355ml",          "envase", "unidad", 1000),
+    ("growler_1l",   "Growlers de vidrio 1L",            "envase", "unidad", 100),
+    ("tapa_corona",  "Tapas corona",                     "envase", "unidad", 2000),
+    ("etiqueta",     "Etiquetas autoadhesivas",          "envase", "unidad", 1000),
+    ("caja_x12",     "Cajas de cartón x12 botellas",     "envase", "unidad", 100),
+    ("precinto",     "Precintos de seguridad",           "envase", "unidad", 500),
+    ("acido_citrico",         "Ácido cítrico",                       "quimico", "kg", 2),
+    ("gelatina_clarificante", "Gelatina clarificante",               "quimico", "kg", 2),
+    ("sales_agua",            "Sales minerales para agua de maceración", "quimico", "kg", 3),
+]
+
+_LUPULOS_SLUGS   = [s for (s, _, c, _u, _m) in _INSUMOS_ADICIONALES if c == "lupulo"]
+_LEVADURAS_SLUGS = [s for (s, _, c, _u, _m) in _INSUMOS_ADICIONALES if c == "levadura"]
+_ESPECIALES_SLUGS = [s for (s, _, c, _u, _m) in _INSUMOS_ADICIONALES if c == "especial"]
+_MALTAS_SLUGS    = [s for (s, _, c, _u, _m) in _INSUMOS_ADICIONALES if c == "malta"]
+
+
+def _insumos_adicionales():
+    """Crea un Producto (tipo Insumo) por cada fila de _INSUMOS_ADICIONALES, en el mismo orden."""
+    productos = []
+    for idx, (slug, nombre, categoria, unidad, minimo) in enumerate(_INSUMOS_ADICIONALES, start=14):
+        productos.append(Producto(
+            codigo=f"INS-{idx:03d}", nombre=nombre,
+            tipo="Insumo", unidad_medida=unidad, stock_minimo=minimo,
+        ))
+    return productos
+
+
+_NOMBRES_CERVEZA = [
+    "Qorikancha", "Wayra", "Apu Dorado", "Tawantinsuyo", "Amaru", "Raymi",
+    "Chaska", "Wiraqocha", "Puma Dorado", "Inkari", "Sumaq", "Ayni",
+    "Kuntur", "Wari", "Yawar", "Chullpa", "Munay", "Sonqo", "Tinkuy", "Ch'aska",
+]
+_ESTILOS_CERVEZA = [
+    "Golden Ale", "Pale Ale", "Session IPA", "Red Ale", "Brown Ale",
+    "Porter", "Scotch Ale", "Saison", "Gose", "Bock", "Cream Ale", "Tripel",
+]
+_PRESENTACIONES_CERVEZA = [
+    "Botella 620ml", "Lata 355ml", "Growler 1L", "Barril 20L", "Edición Limitada",
+]
+
+
+def _terminados_adicionales(cantidad):
+    """
+    Crea `cantidad` cervezas nuevas combinando nombre + estilo +
+    presentación. Todas se miden en litros (igual que las 5 cervezas
+    originales): la "presentación" es el nombre comercial de la
+    botella o formato, pero lo que se controla en stock es el volumen
+    de cerveza, no el número de envases — así se evita mezclar dos
+    unidades de medida distintas para el mismo producto.
+    """
+    productos = []
+    for i in range(cantidad):
+        nombre_base = _NOMBRES_CERVEZA[i % len(_NOMBRES_CERVEZA)]
+        estilo = _ESTILOS_CERVEZA[(i * 3 + 1) % len(_ESTILOS_CERVEZA)]
+        presentacion = _PRESENTACIONES_CERVEZA[i % len(_PRESENTACIONES_CERVEZA)]
+        nombre = f"{nombre_base} {estilo} — {presentacion}"
+        precio = round(38.0 + (i % 12) * 1.8 + (7.0 if "Edición" in presentacion else 0.0), 2)
+        minimo = 8 + (i % 5) * 2
+        productos.append(Producto(
+            codigo=f"PRD-{i + 6:03d}", nombre=nombre,
+            descripcion=f"Cerveza artesanal estilo {estilo}, presentación {presentacion}.",
+            tipo="Producto terminado", unidad_medida="L",
+            precio_venta=precio, stock_minimo=minimo,
+        ))
+    return productos
+
+
+def _recetas_adicionales(db, terminados_nuevos, mp, mp2):
+    """
+    Una receta por cada cerveza nueva. Las proporciones de malta,
+    lúpulo y levadura por litro de rendimiento son las MISMAS que ya
+    se ven en las 5 recetas originales (Anka Chida, Killa Negra...):
+    ≈0.27 kg de malta, ≈0.005 kg de lúpulo y ≈1.5 g de levadura por
+    litro. Cada receta suma además un insumo "de autor" (fruta,
+    especia o madera, según el índice) y los materiales de embotellado
+    (botella, tapa, etiqueta, caja) calculados según el rendimiento del
+    lote — así el envase que compramos también se usa de verdad.
+
+    `mp`  = diccionario código -> Producto de los insumos ORIGINALES.
+    `mp2` = diccionario slug   -> Producto de los insumos NUEVOS.
+    """
+    rendimientos_ciclo = [60.0, 70.0, 80.0, 90.0, 100.0]
+    recetas = []
+    ingredientes_todos = []
+
+    for i, terminado in enumerate(terminados_nuevos):
+        rendimiento = rendimientos_ciclo[i % len(rendimientos_ciclo)]
+        receta = Receta(
+            producto_terminado_id=terminado.id,
+            descripcion=f"Lote estándar de {terminado.nombre}, {rendimiento:.0f}L.",
+            rendimiento=rendimiento, unidad_rendimiento="L",
+        )
+        db.add(receta)
+        db.flush()  # para tener receta.id antes de crear sus ingredientes
+
+        malta_extra_slug = _MALTAS_SLUGS[i % len(_MALTAS_SLUGS)]
+        lupulo_slug = _LUPULOS_SLUGS[i % len(_LUPULOS_SLUGS)]
+        levadura_slug = _LEVADURAS_SLUGS[i % len(_LEVADURAS_SLUGS)]
+        especial_slug = _ESPECIALES_SLUGS[i % len(_ESPECIALES_SLUGS)]
+
+        cant_malta_base = round(rendimiento * 0.18, 2)
+        cant_malta_extra = round(rendimiento * 0.09, 2)
+        cant_lupulo = round(rendimiento * 0.005, 3)
+        cant_levadura = round(rendimiento * 1.5, 1)
+        cant_especial = round(rendimiento * 0.03, 2)
+        n_botellas = float(round(rendimiento / 0.62))
+        n_cajas = float(max(1, round(n_botellas / 12)))
+
+        lineas = [
+            (mp["INS-001"].id, cant_malta_base, "kg"),
+            (mp2[malta_extra_slug].id, cant_malta_extra, "kg"),
+            (mp2[lupulo_slug].id, cant_lupulo, "kg"),
+            (mp2[levadura_slug].id, cant_levadura, "g"),
+            (mp2[especial_slug].id, cant_especial, "kg"),
+            (mp2["botella_620"].id, n_botellas, "unidad"),
+            (mp2["tapa_corona"].id, n_botellas, "unidad"),
+            (mp2["etiqueta"].id, n_botellas, "unidad"),
+            (mp2["caja_x12"].id, n_cajas, "unidad"),
+        ]
+        for insumo_id, cantidad, unidad in lineas:
+            ingredientes_todos.append(IngredienteReceta(
+                receta_id=receta.id, insumo_id=insumo_id,
+                cantidad=cantidad, unidad=unidad,
+            ))
+        recetas.append(receta)
+
+    db.add_all(ingredientes_todos)
+    return recetas
+
+
+_CANTIDAD_COMPRA_POR_CATEGORIA = {
+    "malta": 90.0, "lupulo": 10.0, "levadura": 3000.0,
+    "especial": 35.0, "envase": 9000.0, "quimico": 15.0,
+}
+_PRECIO_COMPRA_POR_CATEGORIA = {
+    "malta": 4.5, "lupulo": 58.0, "levadura": 0.18,
+    "especial": 20.0, "envase": 1.2, "quimico": 12.0,
+}
+# Excepciones puntuales (unidades más caras o que se compran en lotes chicos)
+_CANTIDAD_COMPRA_ESPECIAL = {"caja_x12": 500.0, "precinto": 500.0, "growler_1l": 100.0}
+_PRECIO_COMPRA_ESPECIAL = {"growler_1l": 25.0, "caja_x12": 2.0, "precinto": 0.05}
+
+
+def _compras_adicionales(mp2, mp_original, proveedores_todos):
+    """
+    Una orden de compra por cada insumo nuevo, para dejar todo el
+    inventario con stock ANTES de fabricar las recetas nuevas —
+    exactamente el mismo patrón que las 10 compras originales de más
+    arriba, solo que en bucle. Las cantidades son generosas a
+    propósito: mejor que sobre insumo a que una producción se quede a
+    medias por falta de stock (regla FIFO real de logica_inventario.py).
+    """
+    for i, (slug, nombre, categoria, unidad, minimo) in enumerate(_INSUMOS_ADICIONALES):
+        insumo = mp2[slug]
+        proveedor = proveedores_todos[i % len(proveedores_todos)]
+        cantidad = _CANTIDAD_COMPRA_ESPECIAL.get(slug, _CANTIDAD_COMPRA_POR_CATEGORIA[categoria])
+        precio = _PRECIO_COMPRA_ESPECIAL.get(slug, _PRECIO_COMPRA_POR_CATEGORIA[categoria])
+        registrar_compra(
+            proveedor_id=proveedor.id,
+            items=[{"producto_id": insumo.id, "cantidad": cantidad, "precio_unitario": precio}],
+            documento_referencia=f"F-GEN-{i + 1:04d}",
+        )
+
+    # Top-up de malta de cebada base: las 46 recetas nuevas TAMBIÉN
+    # usan este insumo (el mismo de Anka Chida, Killa Negra, etc.), así
+    # que hace falta reforzar el stock para que alcance para todo.
+    registrar_compra(
+        proveedor_id=proveedores_todos[0].id,
+        items=[{"producto_id": mp_original["INS-001"].id,
+                 "cantidad": 2000.0, "precio_unitario": 4.15}],
+        documento_referencia="F-GEN-9999",
+    )
+
+
+def _producciones_adicionales(recetas_nuevas):
+    """
+    Una orden de producción por cada receta nueva, con la MISMA
+    proporción de estados que las 10 órdenes originales: 7 de cada 10
+    cerradas, 2 en proceso, 1 recién iniciada.
+    """
+    contador_lote = 11
+    for i, receta in enumerate(recetas_nuevas):
+        numero_lote = f"LOTE-2026-{contador_lote:03d}"
+        contador_lote += 1
+        planeada = receta.rendimiento
+
+        op = crear_orden(
+            receta_id=receta.id, cantidad_planeada=planeada,
+            numero_lote=numero_lote,
+            observaciones=f"Lote generado — {receta.descripcion}",
+        )
+
+        posicion = i % 10
+        if posicion < 7:                       # 7 de cada 10 -> CERRADA
+            iniciar_proceso(op.id)
+            factor_real = 0.94 + (i % 4) * 0.01     # entre 0.94 y 0.97
+            real = round(planeada * factor_real, 1)
+            merma = round(planeada - real, 1)
+            cerrar_orden(
+                op.id, cantidad_real=real, cantidad_merma=merma,
+                causa_merma="Pérdida normal de proceso",
+                costo_mano_obra=round(planeada * 1.9, 2),
+                costos_indirectos=round(planeada * 0.65, 2),
+            )
+        elif posicion < 9:                     # 2 de cada 10 -> EN_PROCESO
+            iniciar_proceso(op.id)
+        # el resto (1 de cada 10) se queda INICIADA, tal cual se crea
+
+
+def _ventas_adicionales(terminados_nuevos, clientes_todos):
+    """
+    Vende parte del stock recién producido de cada cerveza nueva,
+    repartido entre varios clientes nuevos. Antes de cada venta se
+    consulta el stock REAL en la base de datos (con stock_total, la
+    misma función que usa el resto del sistema) — no un cálculo hecho
+    a mano — para no arriesgarse a pedir más de lo que hay.
+    """
+    contador_venta = 0
+    for i, terminado in enumerate(terminados_nuevos):
+        with nueva_sesion() as db:
+            disponible = stock_total(db, terminado.id)
+        if disponible < 1:
+            continue  # esta cerveza todavía no tiene producción cerrada
+
+        precio = round(40.0 + (i % 10) * 1.5, 2)
+
+        cliente = clientes_todos[contador_venta % len(clientes_todos)]
+        cantidad = round(disponible * 0.35, 1)
+        if cantidad >= 1:
+            registrar_venta(
+                cliente_id=cliente.id,
+                items=[{"producto_id": terminado.id, "cantidad": cantidad,
+                        "precio_unitario": precio}],
+            )
+            contador_venta += 1
+
+        with nueva_sesion() as db:
+            disponible2 = stock_total(db, terminado.id)
+        if disponible2 >= 2:
+            cliente2 = clientes_todos[(contador_venta + 5) % len(clientes_todos)]
+            cantidad2 = round(disponible2 * 0.3, 1)
+            if cantidad2 >= 1:
+                registrar_venta(
+                    cliente_id=cliente2.id,
+                    items=[{"producto_id": terminado.id, "cantidad": cantidad2,
+                            "precio_unitario": round(precio * 0.98, 2)}],
+                )
+                contador_venta += 1
+
+
+_TIPOS_CLIENTE_JURIDICO = [
+    "Restobar", "Restaurant", "Hotel Boutique", "Distribuidora",
+    "Bodega", "Supermercado", "Licorería", "Mercado", "Feria Gastronómica",
+    "Club Social", "Grifo y Minimarket", "Pub",
+]
+
+
+def _clientes_adicionales(cantidad):
+    """Clientes extra: alterna entre empresas (JURIDICA) y personas (NATURAL)."""
+    clientes = []
+    for i in range(cantidad):
+        if i % 2 == 0:
+            tipo_neg = _TIPOS_CLIENTE_JURIDICO[i % len(_TIPOS_CLIENTE_JURIDICO)]
+            lugar = _LUGARES_CUSCO[(i * 2) % len(_LUGARES_CUSCO)]
+            forma = _FORMAS_LEGALES[i % len(_FORMAS_LEGALES)]
+            slug = tipo_neg.lower().replace(" ", "")
+            clientes.append(Cliente(
+                tipo="JURIDICA", nombre=f"{tipo_neg} {lugar} {forma}",
+                documento=f"20{800000000 + i:09d}",
+                telefono=f"984{400000 + i:06d}",
+                email=f"contacto{i + 1}@{slug}.pe",
+            ))
+        else:
+            nombre_p = _NOMBRES[(i * 3 + 2) % len(_NOMBRES)]
+            apellido1 = _APELLIDOS[(i * 5) % len(_APELLIDOS)]
+            apellido2 = _APELLIDOS[(i * 11 + 4) % len(_APELLIDOS)]
+            clientes.append(Cliente(
+                tipo="NATURAL", nombre=f"{nombre_p} {apellido1} {apellido2}",
+                documento=f"{40000000 + i:08d}",
+                telefono=f"984{500000 + i:06d}",
+            ))
+    return clientes
+
+
+# ══════════════════════════════════════════════════════════════════
+#  CARGA PRINCIPAL
+# ══════════════════════════════════════════════════════════════════
 
 def cargar_datos_iniciales():
     with nueva_sesion() as db:
@@ -34,7 +483,7 @@ def cargar_datos_iniciales():
             return  # ya inicializado
 
         # ══════════════════════════════════════════════════════════
-        # USUARIOS (6 — uno por rol)
+        # PARTE 1 — USUARIOS (6 — uno por rol, credenciales de prueba)
         # ══════════════════════════════════════════════════════════
         db.add_all([
             Usuario(usuario="admin",      nombre_completo="Administrador del Sistema",
@@ -239,6 +688,30 @@ def cargar_datos_iniciales():
             IngredienteReceta(receta_id=receta_pachama.id,
                                insumo_id=mp["INS-003"].id, cantidad=90.0, unidad="g"),
         ])
+
+        # ══════════════════════════════════════════════════════════
+        # PARTE 2 — datos generados (ver funciones al inicio del archivo)
+        # ══════════════════════════════════════════════════════════
+        usuarios_extra = _usuarios_adicionales()
+        db.add_all(usuarios_extra)
+
+        proveedores_extra = _proveedores_adicionales(43)
+        db.add_all(proveedores_extra)
+
+        insumos_extra = _insumos_adicionales()
+        db.add_all(insumos_extra)
+
+        terminados_extra = _terminados_adicionales(62)
+        db.add_all(terminados_extra)
+
+        clientes_extra = _clientes_adicionales(43)
+        db.add_all(clientes_extra)
+
+        db.flush()  # IDs para todo lo de arriba, antes de armar las recetas nuevas
+
+        mp2 = {slug: prod for (slug, *_resto), prod in zip(_INSUMOS_ADICIONALES, insumos_extra)}
+        recetas_extra = _recetas_adicionales(db, terminados_extra, mp, mp2)
+
         db.commit()
 
         # Guardamos IDs para usarlos fuera de la sesión
@@ -478,6 +951,16 @@ def cargar_datos_iniciales():
     _v(8, [{"producto_id": prd_anka,   "cantidad": 20.0, "precio_unitario": 45.0},
            {"producto_id": prd_weizen, "cantidad": 6.0, "precio_unitario": 42.0}])
 
+    # ══════════════════════════════════════════════════════════
+    # PARTE 2 — compras, producción y ventas generadas
+    # ══════════════════════════════════════════════════════════
+    proveedores_todos = proveedores + proveedores_extra
+    clientes_todos = clientes + clientes_extra
+
+    _compras_adicionales(mp2, mp, proveedores_todos)
+    _producciones_adicionales(recetas_extra)
+    _ventas_adicionales(terminados_extra, clientes_todos)
+
     # Capital inicial de referencia
     establecer_parametro("capital_inicial", "25000.00")
 
@@ -493,4 +976,5 @@ def cargar_datos_iniciales():
     establecer_parametro("empresa_ciudad",    "Cusco, Perú")
     establecer_parametro("empresa_web",       "www.cerveceria-vallsagrado.pe")
 
-    print("[datos_iniciales] Base de datos inicializada con datos completos de ejemplo.")
+    print("[datos_iniciales] Base de datos inicializada con datos completos de ejemplo "
+          "(50+ filas por tabla).")

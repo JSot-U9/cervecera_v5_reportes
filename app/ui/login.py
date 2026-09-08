@@ -19,6 +19,7 @@ from app.logica_autenticacion import iniciar_sesion, ErrorAutenticacion
 from app.ui.estilos import aplicar_estilos, COLOR_ALERTA
 from app.ui.widgets import ajustar_ventana_a_contenido
 from app.ui.logo import cargar_logo
+from app.ui.dialogo_creditos import mostrar_creditos
 
 
 class VentanaLogin(tk.Tk):
@@ -61,6 +62,9 @@ class VentanaLogin(tk.Tk):
                    command=self._intentar_login).pack(fill="x", pady=(4, 4))
         ttk.Button(contenedor, text="Salir", style="Secundario.TButton",
                    command=self._salir).pack(fill="x")
+
+        ttk.Button(contenedor, text="ℹ️  Créditos", style="Secundario.TButton",
+                   command=lambda: mostrar_creditos(self)).pack(fill="x", pady=(6, 0))
 
         entrada_usuario.focus_set()
         ajustar_ventana_a_contenido(self)

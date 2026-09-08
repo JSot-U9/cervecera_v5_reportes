@@ -1,14 +1,10 @@
 """
 vista_produccion.py
 ====================
-Módulo de Producción — gestión de órdenes de elaboración de cerveza.
-
-Permite:
-  - Crear una orden nueva: la receta se selecciona y el número de lote
-    se genera automáticamente en formato LOTE-{AÑO}-{NNN}.
-  - Iniciar el proceso (estado: INICIADA → EN_PROCESO).
-  - Cerrar la orden: consume insumos por FIFO, registra merma, crea el
-    lote de producto terminado y calcula el costo de producción.
+Módulo de Producción — mejoras UX:
+- Estados visuales con colores
+- Formularios con secciones y validación mejorada
+- Mensajes descriptivos de éxito/error
 """
 
 import tkinter as tk
@@ -22,8 +18,11 @@ from app.seguridad import puede
 from app.logica_produccion import (
     crear_orden, iniciar_proceso, cerrar_orden, listar_ordenes, listar_recetas_activas,
 )
-from app.ui.widgets import EncabezadoModulo, BarraBusqueda, TablaDatos, ajustar_ventana_a_contenido
-from app.ui.estilos import COLOR_TEXTO_SECUNDARIO
+from app.ui.widgets import (
+    EncabezadoModulo, BarraBusqueda, TablaDatos, ajustar_ventana_a_contenido,
+    centrar_ventana, SeccionFormulario, MensajeEstado, formatear_estado
+)
+from app.ui.estilos import COLOR_TEXTO_SECUNDARIO, COLOR_PRIMARIO, COLOR_ADVERTENCIA
 
 ESTADOS_QUE_SE_PUEDEN_CERRAR = ("INICIADA", "EN_PROCESO")
 
@@ -33,8 +32,9 @@ class VistaProduccion(ttk.Frame):
         super().__init__(parent)
         EncabezadoModulo(
             self,
-            "Módulo de Producción",
-            "Planificación, seguimiento y cierre de órdenes de elaboración de cerveza artesanal",
+            "Producción",
+            "Planificación, seguimiento y cierre de órdenes de elaboración de cerveza",
+            icono="🍺",
         ).pack(fill="x")
 
         cuerpo = ttk.Frame(self, padding=12)
@@ -44,22 +44,27 @@ class VistaProduccion(ttk.Frame):
         puede_iniciar = puede(sesion_actual.rol, "produccion", "iniciar")
         puede_cerrar  = puede(sesion_actual.rol, "produccion", "cerrar")
 
-        barra = BarraBusqueda(cuerpo, al_escribir=lambda t: self.tabla.filtrar(t))
+        barra = BarraBusqueda(cuerpo, al_escribir=lambda t: self.tabla.filtrar(t),
+                               placeholder="🔎  Buscar orden, lote, producto...")
         if puede_crear:
-            barra.agregar_boton("+ Nueva orden de producción", self._abrir_nueva_orden)
+            barra.agregar_boton("＋  Nueva orden", self._abrir_nueva_orden)
         if puede_iniciar:
-            barra.agregar_boton("▶ Iniciar proceso", self._iniciar)
+            barra.agregar_boton("▶  Iniciar", self._iniciar,
+                                 estilo="AccionSecundaria.TButton")
         if puede_cerrar:
-            barra.agregar_boton("✔ Cerrar orden", self._abrir_cerrar_orden)
-        barra.agregar_boton("📊  Generar reporte…", self._abrir_dialogo_reporte)
+            barra.agregar_boton("✔  Cerrar orden", self._abrir_cerrar_orden,
+                                 estilo="AccionSecundaria.TButton")
+        barra.agregar_boton("📊  Reporte", self._abrir_dialogo_reporte,
+                             estilo="AccionSecundaria.TButton")
         barra.pack(fill="x", pady=(0, 8))
 
         contenedor_tabla = ttk.Frame(cuerpo)
         contenedor_tabla.pack(fill="both", expand=True)
         self.tabla = TablaDatos(
             contenedor_tabla,
-            ["N° de Orden de Producción", "Producto a Elaborar", "N° de Lote",
-             "Cantidad Planeada", "Cantidad Real Obtenida", "Estado"],
+            ["N° Orden", "Producto", "N° Lote", "Cant. Planeada", "Cant. Real", "Estado"],
+            anchos={"N° Orden": 110, "Producto": 180, "N° Lote": 130,
+                    "Cant. Planeada": 110, "Cant. Real": 100, "Estado": 130},
         )
         self.tabla.empaquetar()
 
@@ -68,9 +73,17 @@ class VistaProduccion(ttk.Frame):
     def refrescar(self):
         with nueva_sesion() as db:
             filas = []
+            tags = []
             for orden in listar_ordenes(db):
                 producto = (orden.receta.producto_terminado.nombre
                             if orden.receta else "—")
+                estado_visual = formatear_estado(orden.estado)
+                tag = {
+                    "INICIADA":   "advertencia",
+                    "EN_PROCESO": "advertencia",
+                    "COMPLETADA": "exito",
+                    "CANCELADA":  "alerta",
+                }.get(orden.estado, "normal")
                 filas.append([
                     orden.id,
                     orden.numero,
@@ -78,9 +91,10 @@ class VistaProduccion(ttk.Frame):
                     orden.numero_lote,
                     f"{orden.cantidad_planeada:.1f}",
                     f"{orden.cantidad_real:.1f}" if orden.cantidad_real else "—",
-                    orden.estado,
+                    estado_visual,
                 ])
-        self.tabla.cargar_filas(filas)
+                tags.append(tag)
+        self.tabla.cargar_filas(filas, tags_por_fila=tags)
 
     def _abrir_nueva_orden(self):
         VentanaNuevaOrdenProduccion(self, al_guardar=self.refrescar)
@@ -88,19 +102,20 @@ class VistaProduccion(ttk.Frame):
     def _iniciar(self):
         orden_id = self.tabla.id_seleccionado()
         if not orden_id:
-            messagebox.showwarning("Aviso", "Selecciona una orden de la lista.")
+            messagebox.showwarning("Aviso", "Selecciona una orden de la lista primero.")
             return
         try:
             iniciar_proceso(orden_id)
         except Exception as error:
-            messagebox.showerror("Error", str(error))
+            messagebox.showerror("No se pudo iniciar",
+                                  f"No fue posible iniciar el proceso.\n\nDetalle: {error}")
             return
         self.refrescar()
 
     def _abrir_cerrar_orden(self):
         orden_id = self.tabla.id_seleccionado()
         if not orden_id:
-            messagebox.showwarning("Aviso", "Selecciona una orden de la lista.")
+            messagebox.showwarning("Aviso", "Selecciona una orden de la lista primero.")
             return
 
         with nueva_sesion() as db:
@@ -109,22 +124,25 @@ class VistaProduccion(ttk.Frame):
             estado_actual = orden.estado if orden else "desconocido"
             messagebox.showerror(
                 "No se puede cerrar",
-                f"La orden está en estado '{estado_actual}'.\n"
-                f"Solo se pueden cerrar órdenes en estado INICIADA o EN_PROCESO.",
-            )
+                f"La orden está en estado '{estado_actual}'.\n\n"
+                f"Solo se pueden cerrar órdenes en estado INICIADA o EN_PROCESO.")
             return
 
         VentanaCerrarOrden(self, orden_id, al_guardar=self.refrescar)
-
 
     def _abrir_dialogo_reporte(self):
         from app.ui.dialogo_reporte import DialogoReporte
         DialogoReporte(self.winfo_toplevel(), modulo="produccion")
 
+
+# ══════════════════════════════════════════════════════════════════
+
 class VentanaNuevaOrdenProduccion(tk.Toplevel):
     def __init__(self, parent, al_guardar):
         super().__init__(parent)
         self.title("Nueva orden de producción")
+        self.resizable(False, False)
+        self.grab_set()
         self.al_guardar = al_guardar
 
         with nueva_sesion() as db:
@@ -134,56 +152,77 @@ class VentanaNuevaOrdenProduccion(tk.Toplevel):
                 f"(rinde {r.rendimiento} {r.unidad_rendimiento})"
                 for r in self.recetas
             ]
-            # Generar número de lote automáticamente
             n_ordenes = db.query(OrdenProduccion).count()
         numero_lote_auto = f"LOTE-{date.today().year}-{n_ordenes + 1:03d}"
 
-        contenedor = ttk.Frame(self, padding=16)
-        contenedor.pack(fill="both", expand=True)
+        franja = tk.Frame(self, bg=COLOR_PRIMARIO, pady=12, padx=20)
+        franja.pack(fill="x")
+        tk.Label(franja, text="🍺  Nueva orden de producción",
+                 bg=COLOR_PRIMARIO, fg="white",
+                 font=("Segoe UI", 13, "bold")).pack(anchor="w")
 
-        ttk.Label(contenedor, text="Receta de cerveza a elaborar:").pack(anchor="w")
+        cuerpo = ttk.Frame(self, padding=(20, 16))
+        cuerpo.pack(fill="both", expand=True)
+
+        self._msg = MensajeEstado(cuerpo)
+        self._msg.pack(fill="x", pady=(0, 8))
+
+        sec = SeccionFormulario(cuerpo, "Datos de la orden")
+        sec.pack(fill="x", pady=(0, 10))
+
+        ttk.Label(sec, text="Receta de cerveza *",
+                  font=("Segoe UI", 9, "bold")).pack(anchor="w")
         self.combo_receta = ttk.Combobox(
-            contenedor, state="readonly", values=self.opciones_receta)
-        self.combo_receta.pack(fill="x", pady=(0, 8))
+            sec, state="readonly", values=self.opciones_receta, width=50)
+        self.combo_receta.pack(fill="x", pady=(2, 8))
 
-        ttk.Label(contenedor, text="Cantidad planeada a producir:").pack(anchor="w")
+        ttk.Label(sec, text="Cantidad planeada a producir *",
+                  font=("Segoe UI", 9, "bold")).pack(anchor="w")
         self.var_cantidad = tk.StringVar()
-        ttk.Entry(contenedor, textvariable=self.var_cantidad).pack(fill="x", pady=(0, 8))
+        ttk.Entry(sec, textvariable=self.var_cantidad, width=20).pack(anchor="w", pady=(2, 8))
 
-        # Número de lote autocompletado pero editable
-        marco_lote = ttk.LabelFrame(contenedor, text="Número de lote de producción", padding=8)
-        marco_lote.pack(fill="x", pady=(0, 8))
-        ttk.Label(
-            marco_lote,
-            text="Se generó automáticamente siguiendo el formato LOTE-AÑO-NNN.\n"
-                 "Puedes editarlo si necesitas un número diferente.",
-            foreground=COLOR_TEXTO_SECUNDARIO,
-        ).pack(anchor="w", pady=(0, 4))
+        sec_lote = SeccionFormulario(cuerpo, "Número de lote")
+        sec_lote.pack(fill="x", pady=(0, 10))
+        ttk.Label(sec_lote,
+                  text="Generado automáticamente. Puedes editarlo si es necesario.",
+                  style="CampoAuto.TLabel").pack(anchor="w")
         self.var_numero_lote = tk.StringVar(value=numero_lote_auto)
-        ttk.Entry(marco_lote, textvariable=self.var_numero_lote).pack(fill="x")
+        ttk.Entry(sec_lote, textvariable=self.var_numero_lote, width=25).pack(
+            anchor="w", pady=(4, 0))
 
-        ttk.Label(contenedor, text="Observaciones (opcional):").pack(anchor="w", pady=(8, 0))
+        sec_obs = SeccionFormulario(cuerpo, "Observaciones")
+        sec_obs.pack(fill="x", pady=(0, 10))
         self.var_observaciones = tk.StringVar()
-        ttk.Entry(contenedor, textvariable=self.var_observaciones).pack(fill="x", pady=(0, 10))
+        ttk.Entry(sec_obs, textvariable=self.var_observaciones, width=50).pack(
+            fill="x", pady=(2, 0))
+        ttk.Label(sec_obs, text="Opcional", style="CampoAuto.TLabel").pack(anchor="w")
 
-        ttk.Button(contenedor, text="Crear orden de producción",
-                   command=self._guardar).pack(fill="x")
+        ttk.Label(cuerpo, text="* Campo obligatorio",
+                  style="CampoAuto.TLabel").pack(anchor="w", pady=(4, 8))
 
-        ajustar_ventana_a_contenido(self, ancho=420)
+        fila_btn = ttk.Frame(cuerpo)
+        fila_btn.pack(fill="x")
+        ttk.Button(fila_btn, text="Cancelar", style="Secundario.TButton",
+                   command=self.destroy).pack(side="right", padx=(8, 0))
+        ttk.Button(fila_btn, text="🍺  Crear orden",
+                   command=self._guardar).pack(side="right")
+
+        self.bind("<Escape>", lambda e: self.destroy())
+        centrar_ventana(self, 480, 460)
 
     def _guardar(self):
         if not self.combo_receta.get():
-            messagebox.showwarning("Aviso", "Selecciona una receta.")
+            self._msg.mostrar("Selecciona una receta de cerveza.", "error")
             return
         if not self.var_numero_lote.get().strip():
-            messagebox.showwarning("Aviso", "El número de lote es obligatorio.")
+            self._msg.mostrar("El número de lote es obligatorio.", "error")
             return
         try:
             cantidad = float(self.var_cantidad.get())
             if cantidad <= 0:
                 raise ValueError
         except ValueError:
-            messagebox.showwarning("Aviso", "La cantidad planeada debe ser un número positivo.")
+            self._msg.mostrar("La cantidad planeada debe ser un número mayor que 0.", "error")
             return
 
         receta_id = int(self.combo_receta.get().split(" — ")[0])
@@ -195,13 +234,15 @@ class VentanaNuevaOrdenProduccion(tk.Toplevel):
                 observaciones=self.var_observaciones.get().strip(),
                 usuario_id=sesion_actual.usuario_id,
             )
-            messagebox.showinfo("Orden creada",
-                                 f"Orden {orden.numero} creada con el lote "
-                                 f"{self.var_numero_lote.get().strip()}.")
         except Exception as error:
-            messagebox.showerror("Error", str(error))
+            messagebox.showerror("No se pudo crear la orden",
+                                  f"Ocurrió un error:\n\n{error}")
             return
 
+        messagebox.showinfo(
+            "✓ Orden creada",
+            f"Orden {orden.numero} creada correctamente.\n"
+            f"Lote: {self.var_numero_lote.get().strip()}")
         self.al_guardar()
         self.destroy()
 
@@ -210,47 +251,92 @@ class VentanaCerrarOrden(tk.Toplevel):
     def __init__(self, parent, orden_id, al_guardar):
         super().__init__(parent)
         self.title("Cerrar orden de producción")
+        self.resizable(False, False)
+        self.grab_set()
         self.orden_id = orden_id
         self.al_guardar = al_guardar
 
-        contenedor = ttk.Frame(self, padding=16)
-        contenedor.pack(fill="both", expand=True)
+        franja = tk.Frame(self, bg=COLOR_PRIMARIO, pady=12, padx=20)
+        franja.pack(fill="x")
+        tk.Label(franja, text="✔  Cerrar orden de producción",
+                 bg=COLOR_PRIMARIO, fg="white",
+                 font=("Segoe UI", 13, "bold")).pack(anchor="w")
+
+        cuerpo = ttk.Frame(self, padding=(20, 16))
+        cuerpo.pack(fill="both", expand=True)
+
+        self._msg = MensajeEstado(cuerpo)
+        self._msg.pack(fill="x", pady=(0, 8))
 
         ttk.Label(
-            contenedor,
-            text="Al cerrar la orden se descuentan los insumos del inventario (por FIFO),\n"
-                 "se crea el lote de producto terminado y se calcula el costo real de producción.",
+            cuerpo,
+            text="Al cerrar la orden:\n"
+                 "  • Se descuentan los insumos del inventario (FIFO)\n"
+                 "  • Se crea el lote de producto terminado\n"
+                 "  • Se calcula el costo real de producción",
             foreground=COLOR_TEXTO_SECUNDARIO,
+            font=("Segoe UI", 9),
             justify="left",
         ).pack(anchor="w", pady=(0, 12))
 
-        ttk.Label(contenedor, text="Cantidad real producida (litros u otra unidad):").pack(
-            anchor="w")
+        sec_prod = SeccionFormulario(cuerpo, "Producción real")
+        sec_prod.pack(fill="x", pady=(0, 10))
+
+        f1 = ttk.Frame(sec_prod)
+        f1.pack(fill="x", pady=(0, 6))
+        c1 = ttk.Frame(f1)
+        c1.pack(side="left", padx=(0, 20))
+        ttk.Label(c1, text="Cantidad real producida *",
+                  font=("Segoe UI", 9, "bold")).pack(anchor="w")
         self.var_cantidad_real = tk.StringVar()
-        ttk.Entry(contenedor, textvariable=self.var_cantidad_real).pack(fill="x", pady=(0, 8))
+        ttk.Entry(c1, textvariable=self.var_cantidad_real, width=14).pack(pady=(2, 0))
 
-        ttk.Label(contenedor, text="Cantidad de merma (0 si no hubo pérdidas):").pack(anchor="w")
+        c2 = ttk.Frame(f1)
+        c2.pack(side="left")
+        ttk.Label(c2, text="Cantidad de merma",
+                  font=("Segoe UI", 9)).pack(anchor="w")
         self.var_merma = tk.StringVar(value="0")
-        ttk.Entry(contenedor, textvariable=self.var_merma).pack(fill="x", pady=(0, 8))
+        ttk.Entry(c2, textvariable=self.var_merma, width=14).pack(pady=(2, 0))
 
-        ttk.Label(contenedor, text="Causa de la merma (dejar en blanco si no hubo):").pack(
-            anchor="w")
+        ttk.Label(sec_prod, text="Causa de la merma (dejar en blanco si no hubo)",
+                  font=("Segoe UI", 9)).pack(anchor="w", pady=(4, 0))
         self.var_causa_merma = tk.StringVar()
-        ttk.Entry(contenedor, textvariable=self.var_causa_merma).pack(fill="x", pady=(0, 8))
+        ttk.Entry(sec_prod, textvariable=self.var_causa_merma, width=45).pack(
+            anchor="w", pady=(2, 0))
 
-        ttk.Label(contenedor, text="Costo de mano de obra (S/):").pack(anchor="w")
+        sec_costos = SeccionFormulario(cuerpo, "Costos adicionales")
+        sec_costos.pack(fill="x", pady=(0, 10))
+
+        f2 = ttk.Frame(sec_costos)
+        f2.pack(fill="x")
+        c3 = ttk.Frame(f2)
+        c3.pack(side="left", padx=(0, 20))
+        ttk.Label(c3, text="Mano de obra (S/)",
+                  font=("Segoe UI", 9)).pack(anchor="w")
         self.var_mano_obra = tk.StringVar(value="0")
-        ttk.Entry(contenedor, textvariable=self.var_mano_obra).pack(fill="x", pady=(0, 8))
+        ttk.Entry(c3, textvariable=self.var_mano_obra, width=14).pack(pady=(2, 0))
 
-        ttk.Label(contenedor, text="Costos indirectos — energía, agua, etc. (S/):").pack(
-            anchor="w")
+        c4 = ttk.Frame(f2)
+        c4.pack(side="left")
+        ttk.Label(c4, text="Costos indirectos (S/)",
+                  font=("Segoe UI", 9)).pack(anchor="w")
         self.var_indirectos = tk.StringVar(value="0")
-        ttk.Entry(contenedor, textvariable=self.var_indirectos).pack(fill="x", pady=(0, 10))
+        ttk.Entry(c4, textvariable=self.var_indirectos, width=14).pack(pady=(2, 0))
+        ttk.Label(c4, text="Energía, agua, etc.",
+                  style="CampoAuto.TLabel").pack(anchor="w")
 
-        ttk.Button(contenedor, text="Cerrar orden y calcular costos de producción",
-                   command=self._guardar).pack(fill="x")
+        ttk.Label(cuerpo, text="* Campo obligatorio",
+                  style="CampoAuto.TLabel").pack(anchor="w", pady=(4, 8))
 
-        ajustar_ventana_a_contenido(self, ancho=420)
+        fila_btn = ttk.Frame(cuerpo)
+        fila_btn.pack(fill="x")
+        ttk.Button(fila_btn, text="Cancelar", style="Secundario.TButton",
+                   command=self.destroy).pack(side="right", padx=(8, 0))
+        ttk.Button(fila_btn, text="✔  Cerrar y costear orden",
+                   command=self._guardar).pack(side="right")
+
+        self.bind("<Escape>", lambda e: self.destroy())
+        centrar_ventana(self, 480, 520)
 
     def _guardar(self):
         try:
@@ -261,8 +347,9 @@ class VentanaCerrarOrden(tk.Toplevel):
             if cantidad_real <= 0:
                 raise ValueError
         except ValueError:
-            messagebox.showwarning("Aviso",
-                                    "Revisa que los números ingresados sean válidos y positivos.")
+            self._msg.mostrar(
+                "Revisa que la cantidad real sea mayor que 0 y todos los números sean válidos.",
+                "error")
             return
 
         try:
@@ -275,11 +362,15 @@ class VentanaCerrarOrden(tk.Toplevel):
                 costos_indirectos=indirectos,
                 usuario_id=sesion_actual.usuario_id,
             )
-            messagebox.showinfo("Orden cerrada",
-                                 f"Orden {orden.numero} cerrada y costeada correctamente.")
         except Exception as error:
-            messagebox.showerror("Error", str(error))
+            messagebox.showerror("No se pudo cerrar la orden",
+                                  f"Ocurrió un error:\n\n{error}")
             return
 
+        messagebox.showinfo(
+            "✓ Orden cerrada correctamente",
+            f"La orden {orden.numero} fue cerrada y costeada.\n"
+            f"Cantidad real: {cantidad_real:.1f}\n"
+            f"El inventario de insumos fue descontado.")
         self.al_guardar()
         self.destroy()

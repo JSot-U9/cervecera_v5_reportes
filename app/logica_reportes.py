@@ -24,6 +24,18 @@ Cada uno devuelve un dict con:
 
 Las funciones de exportación (guardar_pdf / guardar_xlsx / guardar_csv)
 reciben ese dict + una ruta y producen el archivo.
+
+NOTA DE ESTA VERSIÓN:
+  - El PDF ahora se genera SIEMPRE en orientación vertical (portrait),
+    sin importar lo que indique la clave "orientacion" del dict de datos
+    (se deja esa clave en los dicts por compatibilidad, pero ya no se usa
+    para decidir el pagesize).
+  - Los anchos de columna de la tabla principal del PDF se calculan
+    automáticamente según el contenido más largo de cada columna
+    (incluyendo el encabezado), en vez de repartir el ancho en partes
+    iguales. Además, cada celda se envuelve en un Paragraph para que el
+    texto largo haga salto de línea dentro de su columna en vez de
+    desbordarse.
 """
 
 import csv
@@ -36,6 +48,7 @@ from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4, landscape
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import cm
+from reportlab.pdfbase.pdfmetrics import stringWidth
 from reportlab.platypus import (
     SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, HRFlowable,
 )
@@ -217,6 +230,42 @@ NOMBRES_LEGIBLES = {
 
 
 # ══════════════════════════════════════════════════════════════════
+#  UTILIDADES DE MAQUETACIÓN (PDF)
+# ══════════════════════════════════════════════════════════════════
+
+def _anchos_columnas(tabla_data, ancho_disponible,
+                      fuente="Helvetica", fuente_negrita="Helvetica-Bold",
+                      tam=8, min_col=1.8 * cm, max_col=7 * cm, padding=12):
+    """Calcula el ancho ideal de cada columna según el contenido más largo
+    (incluyendo el encabezado en negrita), y escala el resultado para que
+    la suma de todas las columnas encaje exactamente en `ancho_disponible`.
+
+    - min_col / max_col evitan columnas ilegibles o desproporcionadas.
+    - padding es el margen interno aproximado (izq+der) de cada celda.
+    """
+    ncols = len(tabla_data[0])
+    anchos = [0.0] * ncols
+    for i, fila in enumerate(tabla_data):
+        f = fuente_negrita if i == 0 else fuente
+        for j, val in enumerate(fila):
+            texto = str(val)
+            # Si el valor ya es multilínea (contiene \n), medimos la línea más larga
+            linea_mas_larga = max(texto.split("\n"), key=len) if "\n" in texto else texto
+            ancho_txt = stringWidth(linea_mas_larga, f, tam) + padding
+            anchos[j] = max(anchos[j], ancho_txt)
+
+    # aplicar límites mínimo/máximo por columna
+    anchos = [min(max(a, min_col), max_col) for a in anchos]
+
+    # escalar proporcionalmente para ocupar exactamente el ancho disponible
+    total = sum(anchos)
+    if total <= 0:
+        return [ancho_disponible / ncols] * ncols
+    factor = ancho_disponible / total
+    return [a * factor for a in anchos]
+
+
+# ══════════════════════════════════════════════════════════════════
 #  EXPORTADORES
 # ══════════════════════════════════════════════════════════════════
 
@@ -225,6 +274,10 @@ def guardar_pdf(datos: dict, ruta) -> object:
 
     ruta puede ser un Path/str (guarda en disco) o un io.BytesIO
     (escribe en memoria).  Devuelve ruta tal cual se recibió.
+
+    El PDF siempre se genera en orientación vertical (portrait) y las
+    columnas de la tabla principal se ajustan automáticamente según el
+    contenido más largo de cada una.
     """
     import io as _io
     from app.logica_configuracion import obtener_datos_empresa
@@ -234,7 +287,9 @@ def guardar_pdf(datos: dict, ruta) -> object:
     if not _es_buffer:
         ruta = Path(ruta)
     destino = ruta if _es_buffer else str(ruta)
-    orientacion = landscape(A4) if datos.get("orientacion") == "landscape" else A4
+
+    # Orientación siempre vertical, independientemente de datos.get("orientacion")
+    orientacion = A4
     doc = SimpleDocTemplate(
         destino, pagesize=orientacion,
         leftMargin=1.5*cm, rightMargin=1.5*cm,
@@ -260,6 +315,15 @@ def guardar_pdf(datos: dict, ruta) -> object:
         "seccion": ParagraphStyle(
             "seccion", parent=base["Heading2"],
             textColor=_LEATHER, fontSize=11, spaceBefore=10, spaceAfter=4,
+        ),
+        "celda_hdr": ParagraphStyle(
+            "celda_hdr", parent=base["Normal"],
+            textColor=_BLANCO, fontSize=8, leading=10,
+            fontName="Helvetica-Bold", alignment=1,  # centrado
+        ),
+        "celda": ParagraphStyle(
+            "celda", parent=base["Normal"],
+            textColor=_TEXTO, fontSize=8, leading=10,
         ),
     }
 
@@ -322,11 +386,25 @@ def guardar_pdf(datos: dict, ruta) -> object:
         ]))
         historia += [t_kpi, Spacer(1, 0.5*cm)]
 
-    # Tabla de datos
-    tabla_data = [datos["columnas"]] + (datos["filas"] or [["Sin datos registrados"]])
-    ncols = len(datos["columnas"])
-    ancho_col = (doc.width) / ncols
-    t = Table(tabla_data, colWidths=[ancho_col] * ncols, repeatRows=1)
+    # ── Tabla de datos ────────────────────────────────────────────────
+    columnas = datos["columnas"]
+    filas_originales = datos["filas"] or [["Sin datos registrados"] + [""] * (len(columnas) - 1)]
+
+    # Para el cálculo de anchos usamos los valores como texto plano
+    tabla_texto = [columnas] + [[str(v) for v in fila] for fila in filas_originales]
+    ncols = len(columnas)
+    anchos = _anchos_columnas(tabla_texto, doc.width)
+
+    # Para el render envolvemos cada celda en Paragraph, así el texto largo
+    # hace salto de línea dentro de su columna en vez de desbordarse.
+    tabla_data = [
+        [Paragraph(str(col), est["celda_hdr"]) for col in columnas]
+    ] + [
+        [Paragraph(str(v), est["celda"]) for v in fila]
+        for fila in filas_originales
+    ]
+
+    t = Table(tabla_data, colWidths=anchos, repeatRows=1)
     estilo = TableStyle([
         ("BACKGROUND",    (0, 0), (ncols-1, 0), _VERDE_OSCURO),
         ("TEXTCOLOR",     (0, 0), (ncols-1, 0), _BLANCO),

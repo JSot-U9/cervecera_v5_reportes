@@ -1,12 +1,11 @@
 """
 vista_compras.py
 =================
-Módulo de Compras: gestión de órdenes de compra y proveedores.
-
-VentanaNuevaOrden permite armar una orden con VARIOS productos antes
-de guardarla. Al seleccionar un producto, el precio unitario se
-autocompleta con el último precio de compra registrado (si existe).
-Solo al presionar "Guardar orden" se llama a logica_compras.registrar_compra().
+Módulo de Compras — mejoras UX:
+- Encabezados simplificados
+- Mensajes de éxito/error descriptivos
+- Validación inline en formularios
+- Estados visuales en tablas
 """
 
 import tkinter as tk
@@ -21,7 +20,11 @@ from app.logica_compras import (
     registrar_compra, listar_ordenes_compra, listar_proveedores_activos,
     crear_proveedor, actualizar_proveedor,
 )
-from app.ui.widgets import EncabezadoModulo, BarraBusqueda, TablaDatos, ajustar_ventana_a_contenido
+from app.ui.widgets import (
+    EncabezadoModulo, BarraBusqueda, TablaDatos, ajustar_ventana_a_contenido,
+    centrar_ventana, SeccionFormulario, MensajeEstado
+)
+from app.ui.estilos import COLOR_TEXTO_SECUNDARIO, COLOR_PRIMARIO, COLOR_ALERTA
 
 
 class VistaCompras(ttk.Frame):
@@ -29,8 +32,9 @@ class VistaCompras(ttk.Frame):
         super().__init__(parent)
         EncabezadoModulo(
             self,
-            "Módulo de Compras",
-            "Gestión de órdenes de compra a proveedores y registro de insumos al inventario",
+            "Compras",
+            "Órdenes de compra a proveedores · El inventario se actualiza automáticamente",
+            icono="🛒",
         ).pack(fill="x")
 
         notebook = ttk.Notebook(self)
@@ -41,49 +45,52 @@ class VistaCompras(ttk.Frame):
 
         self.refrescar()
 
-    # ── Pestaña: Órdenes de compra ──────────────────────────────
     def _pestana_ordenes(self, notebook):
         pestana = ttk.Frame(notebook, padding=8)
-        notebook.add(pestana, text="Órdenes de Compra")
+        notebook.add(pestana, text="  🧾  Órdenes de Compra  ")
 
         puede_crear = puede(sesion_actual.rol, "compras", "crear")
-        barra = BarraBusqueda(pestana, al_escribir=lambda t: self.tabla_ordenes.filtrar(t))
+        barra = BarraBusqueda(pestana, al_escribir=lambda t: self.tabla_ordenes.filtrar(t),
+                               placeholder="🔎  Buscar orden, proveedor...")
         if puede_crear:
-            barra.agregar_boton("+ Nueva orden de compra", self._abrir_nueva_orden)
-        barra.agregar_boton("📊  Generar reporte…", self._abrir_dialogo_reporte)
+            barra.agregar_boton("＋  Nueva orden", self._abrir_nueva_orden)
+        barra.agregar_boton("📊  Reporte", self._abrir_dialogo_reporte,
+                             estilo="AccionSecundaria.TButton")
         barra.pack(fill="x", pady=(0, 8))
 
         contenedor_tabla = ttk.Frame(pestana)
         contenedor_tabla.pack(fill="both", expand=True)
-        # con_id=True: el ID de la orden queda oculto como iid
         self.tabla_ordenes = TablaDatos(
             contenedor_tabla,
-            ["N° Orden de Compra", "Proveedor", "Fecha de Compra", "Doc. Referencia",
-             "Total (S/)"],
+            ["N° Orden", "Proveedor", "Fecha", "Doc. Referencia", "Total (S/)"],
+            anchos={"N° Orden": 100, "Proveedor": 200, "Fecha": 110,
+                    "Doc. Referencia": 140, "Total (S/)": 110},
         )
         self.tabla_ordenes.empaquetar()
 
-    # ── Pestaña: Proveedores ────────────────────────────────────
     def _pestana_proveedores(self, notebook):
         pestana = ttk.Frame(notebook, padding=8)
-        notebook.add(pestana, text="Proveedores")
+        notebook.add(pestana, text="  🏭  Proveedores  ")
 
         puede_crear = puede(sesion_actual.rol, "compras", "crear")
-        barra = BarraBusqueda(pestana, al_escribir=lambda t: self.tabla_proveedores.filtrar(t))
+        barra = BarraBusqueda(pestana, al_escribir=lambda t: self.tabla_proveedores.filtrar(t),
+                               placeholder="🔎  Buscar proveedor...")
         if puede_crear:
-            barra.agregar_boton("+ Nuevo proveedor", self._abrir_nuevo_proveedor)
-            barra.agregar_boton("Editar proveedor", self._abrir_editar_proveedor)
+            barra.agregar_boton("＋  Nuevo proveedor", self._abrir_nuevo_proveedor)
+            barra.agregar_boton("✏  Editar", self._abrir_editar_proveedor,
+                                 estilo="AccionSecundaria.TButton")
         barra.pack(fill="x", pady=(0, 8))
 
         contenedor_tabla = ttk.Frame(pestana)
         contenedor_tabla.pack(fill="both", expand=True)
         self.tabla_proveedores = TablaDatos(
             contenedor_tabla,
-            ["Razón Social", "RUC", "Persona de Contacto", "Teléfono", "Correo Electrónico"],
+            ["Razón Social", "RUC", "Contacto", "Teléfono", "Correo"],
+            anchos={"Razón Social": 200, "RUC": 110, "Contacto": 150,
+                    "Teléfono": 120, "Correo": 180},
         )
         self.tabla_proveedores.empaquetar()
 
-    # ── Refrescar datos ──────────────────────────────────────────
     def refrescar(self):
         with nueva_sesion() as db:
             filas_ordenes = [
@@ -99,7 +106,6 @@ class VistaCompras(ttk.Frame):
         self.tabla_ordenes.cargar_filas(filas_ordenes)
         self.tabla_proveedores.cargar_filas(filas_proveedores)
 
-    # ── Acciones ─────────────────────────────────────────────────
     def _abrir_nueva_orden(self):
         VentanaNuevaOrden(self, al_guardar=self.refrescar)
 
@@ -109,7 +115,7 @@ class VistaCompras(ttk.Frame):
     def _abrir_editar_proveedor(self):
         proveedor_id = self.tabla_proveedores.id_seleccionado()
         if not proveedor_id:
-            messagebox.showwarning("Aviso", "Selecciona un proveedor de la lista.")
+            messagebox.showwarning("Aviso", "Selecciona un proveedor de la lista primero.")
             return
         with nueva_sesion() as db:
             from app.modelos import Proveedor
@@ -117,56 +123,91 @@ class VistaCompras(ttk.Frame):
             datos = {"razon_social": p.razon_social, "ruc": p.ruc or "",
                      "contacto": p.contacto or "", "telefono": p.telefono or "",
                      "email": p.email or ""}
-        VentanaProveedor(self, al_guardar=self.refrescar, proveedor_id=proveedor_id, datos=datos)
-
+        VentanaProveedor(self, al_guardar=self.refrescar,
+                          proveedor_id=proveedor_id, datos=datos)
 
     def _abrir_dialogo_reporte(self):
         from app.ui.dialogo_reporte import DialogoReporte
         DialogoReporte(self.winfo_toplevel(), modulo="compras")
 
+
+# ══════════════════════════════════════════════════════════════════
+#  Formulario Proveedor
+# ══════════════════════════════════════════════════════════════════
+
 class VentanaProveedor(tk.Toplevel):
-    """Formulario para crear o editar un proveedor."""
+    """Crear o editar un proveedor con validación mejorada."""
 
     def __init__(self, parent, al_guardar, proveedor_id=None, datos=None):
         super().__init__(parent)
         self.title("Editar proveedor" if proveedor_id else "Nuevo proveedor")
+        self.resizable(False, False)
+        self.grab_set()
         self.al_guardar = al_guardar
         self.proveedor_id = proveedor_id
         datos = datos or {}
 
-        campos = ttk.Frame(self, padding=16)
-        campos.pack(fill="both", expand=True)
+        # Encabezado
+        franja = tk.Frame(self, bg=COLOR_PRIMARIO, pady=12, padx=20)
+        franja.pack(fill="x")
+        icono = "✏" if proveedor_id else "＋"
+        tk.Label(franja, text=f"{icono}  {'Editar proveedor' if proveedor_id else 'Nuevo proveedor'}",
+                 bg=COLOR_PRIMARIO, fg="white",
+                 font=("Segoe UI", 13, "bold")).pack(anchor="w")
 
-        self.var_razon_social = tk.StringVar(value=datos.get("razon_social", ""))
-        self.var_ruc          = tk.StringVar(value=datos.get("ruc", ""))
-        self.var_contacto     = tk.StringVar(value=datos.get("contacto", ""))
-        self.var_telefono     = tk.StringVar(value=datos.get("telefono", ""))
-        self.var_email        = tk.StringVar(value=datos.get("email", ""))
+        cuerpo = ttk.Frame(self, padding=(20, 16))
+        cuerpo.pack(fill="both", expand=True)
 
-        for etiqueta, variable in [
-            ("Razón social o nombre del proveedor:", self.var_razon_social),
-            ("RUC (número de identificación tributaria):", self.var_ruc),
-            ("Persona de contacto:", self.var_contacto),
-            ("Teléfono de contacto:", self.var_telefono),
-            ("Correo electrónico:", self.var_email),
-        ]:
-            ttk.Label(campos, text=etiqueta).pack(anchor="w")
-            ttk.Entry(campos, textvariable=variable).pack(fill="x", pady=(0, 8))
+        self._msg = MensajeEstado(cuerpo)
+        self._msg.pack(fill="x", pady=(0, 8))
 
-        ttk.Button(campos, text="Guardar proveedor", command=self._guardar).pack(fill="x", pady=(8, 0))
+        # Sección info
+        sec = SeccionFormulario(cuerpo, "Información del proveedor")
+        sec.pack(fill="x", pady=(0, 12))
+        sec.columnconfigure(1, weight=1)
 
-        ajustar_ventana_a_contenido(self, ancho=390)
+        campos = [
+            ("Razón social *", "razon_social", True),
+            ("RUC", "ruc", False),
+            ("Persona de contacto", "contacto", False),
+            ("Teléfono", "telefono", False),
+            ("Correo electrónico", "email", False),
+        ]
+        self._vars = {}
+        for i, (etiqueta, clave, obligatorio) in enumerate(campos):
+            ttk.Label(sec, text=etiqueta,
+                      font=("Segoe UI", 9, "bold") if obligatorio else ("Segoe UI", 9)
+                      ).grid(row=i, column=0, sticky="w", padx=(0, 12), pady=4)
+            var = tk.StringVar(value=datos.get(clave, ""))
+            ttk.Entry(sec, textvariable=var, width=35).grid(row=i, column=1, sticky="ew", pady=4)
+            self._vars[clave] = var
+
+        # Nota campos obligatorios
+        ttk.Label(cuerpo, text="* Campo obligatorio",
+                  style="CampoAuto.TLabel").pack(anchor="w", pady=(0, 12))
+
+        # Botones
+        fila_btn = ttk.Frame(cuerpo)
+        fila_btn.pack(fill="x")
+        ttk.Button(fila_btn, text="Cancelar", style="Secundario.TButton",
+                   command=self.destroy).pack(side="right", padx=(8, 0))
+        ttk.Button(fila_btn, text="💾  Guardar proveedor",
+                   command=self._guardar).pack(side="right")
+
+        self.bind("<Escape>", lambda e: self.destroy())
+        centrar_ventana(self, 430, 340)
 
     def _guardar(self):
-        if not self.var_razon_social.get().strip():
-            messagebox.showwarning("Aviso", "La razón social es obligatoria.")
+        razon = self._vars["razon_social"].get().strip()
+        if not razon:
+            self._msg.mostrar("La razón social es obligatoria.", "error")
             return
         datos = dict(
-            razon_social=self.var_razon_social.get().strip(),
-            ruc=self.var_ruc.get().strip() or None,
-            contacto=self.var_contacto.get().strip(),
-            telefono=self.var_telefono.get().strip(),
-            email=self.var_email.get().strip(),
+            razon_social=razon,
+            ruc=self._vars["ruc"].get().strip() or None,
+            contacto=self._vars["contacto"].get().strip(),
+            telefono=self._vars["telefono"].get().strip(),
+            email=self._vars["email"].get().strip(),
         )
         try:
             if self.proveedor_id:
@@ -174,11 +215,15 @@ class VentanaProveedor(tk.Toplevel):
             else:
                 crear_proveedor(**datos)
         except Exception as error:
-            messagebox.showerror("Error", str(error))
+            self._msg.mostrar(f"No se pudo guardar el proveedor: {error}", "error", 0)
             return
         self.al_guardar()
         self.destroy()
 
+
+# ══════════════════════════════════════════════════════════════════
+#  Formulario Nueva Orden de Compra
+# ══════════════════════════════════════════════════════════════════
 
 class VentanaNuevaOrden(tk.Toplevel):
     """Formulario para armar y guardar una orden de compra con varios productos."""
@@ -186,13 +231,14 @@ class VentanaNuevaOrden(tk.Toplevel):
     def __init__(self, parent, al_guardar):
         super().__init__(parent)
         self.title("Nueva orden de compra")
+        self.resizable(True, True)
+        self.grab_set()
         self.al_guardar = al_guardar
         self.items_agregados = []
 
         with nueva_sesion() as db:
             self.proveedores = listar_proveedores_activos(db)
             self.productos = db.query(Producto).filter_by(tipo="Insumo", activo=True).all()
-            # Pre-cargar último precio de compra por producto (desde lotes)
             self._ultimos_precios = {}
             for p in self.productos:
                 lote = (db.query(LoteInventario)
@@ -202,94 +248,142 @@ class VentanaNuevaOrden(tk.Toplevel):
                 if lote and lote.costo_unitario:
                     self._ultimos_precios[p.id] = lote.costo_unitario
 
-        contenedor = ttk.Frame(self, padding=16)
-        contenedor.pack(fill="both", expand=True)
+        # Encabezado
+        franja = tk.Frame(self, bg=COLOR_PRIMARIO, pady=12, padx=20)
+        franja.pack(fill="x")
+        tk.Label(franja, text="＋  Nueva orden de compra",
+                 bg=COLOR_PRIMARIO, fg="white",
+                 font=("Segoe UI", 13, "bold")).pack(anchor="w")
+        tk.Label(franja, text="Selecciona proveedor, agrega productos y guarda la orden",
+                 bg=COLOR_PRIMARIO, fg="#D4A369",
+                 font=("Segoe UI", 9)).pack(anchor="w")
 
-        # ── Selección de proveedor ──────────────────────────────
-        ttk.Label(contenedor, text="Proveedor:").pack(anchor="w")
+        cuerpo = ttk.Frame(self, padding=(20, 12))
+        cuerpo.pack(fill="both", expand=True)
+
+        self._msg = MensajeEstado(cuerpo)
+        self._msg.pack(fill="x", pady=(0, 8))
+
+        # ── Proveedor ──────────────────────────────────────────────
+        sec_prov = SeccionFormulario(cuerpo, "Proveedor")
+        sec_prov.pack(fill="x", pady=(0, 10))
+        ttk.Label(sec_prov, text="Proveedor *",
+                  font=("Segoe UI", 9, "bold")).pack(anchor="w")
         self.combo_proveedor = ttk.Combobox(
-            contenedor, state="readonly",
-            values=[f"{p.id} — {p.razon_social}" for p in self.proveedores])
-        self.combo_proveedor.pack(fill="x", pady=(0, 12))
+            sec_prov, state="readonly",
+            values=[f"{p.id} — {p.razon_social}" for p in self.proveedores],
+            width=50)
+        self.combo_proveedor.pack(fill="x", pady=(2, 0))
 
-        # ── Formulario para agregar un producto a la lista ──────
-        sep = ttk.LabelFrame(contenedor, text="Agregar producto a la orden", padding=8)
-        sep.pack(fill="x", pady=(0, 8))
+        # ── Agregar producto ───────────────────────────────────────
+        sec_prod = SeccionFormulario(cuerpo, "Agregar producto a la orden")
+        sec_prod.pack(fill="x", pady=(0, 10))
 
-        fila_producto = ttk.Frame(sep)
-        fila_producto.pack(fill="x", pady=(0, 4))
-        ttk.Label(fila_producto, text="Producto (insumo):").pack(side="left")
+        # Fila producto
+        f_prod = ttk.Frame(sec_prod)
+        f_prod.pack(fill="x", pady=(0, 6))
+        ttk.Label(f_prod, text="Producto *",
+                  font=("Segoe UI", 9, "bold")).pack(anchor="w")
         self.combo_producto = ttk.Combobox(
-            fila_producto, state="readonly", width=34,
+            f_prod, state="readonly", width=55,
             values=[f"{p.id} — {p.nombre}" for p in self.productos])
-        self.combo_producto.pack(side="left", padx=6)
+        self.combo_producto.pack(fill="x", pady=(2, 0))
         self.combo_producto.bind("<<ComboboxSelected>>", self._autocompletar_precio)
 
-        fila_nums = ttk.Frame(sep)
-        fila_nums.pack(fill="x", pady=(0, 4))
-        ttk.Label(fila_nums, text="Cantidad:").pack(side="left")
+        # Fila cantidades
+        f_nums = ttk.Frame(sec_prod)
+        f_nums.pack(fill="x", pady=(0, 6))
+
+        col_cant = ttk.Frame(f_nums)
+        col_cant.pack(side="left", padx=(0, 16))
+        ttk.Label(col_cant, text="Cantidad *",
+                  font=("Segoe UI", 9, "bold")).pack(anchor="w")
         self.var_cantidad = tk.StringVar()
-        ttk.Entry(fila_nums, textvariable=self.var_cantidad, width=10).pack(side="left", padx=6)
+        ttk.Entry(col_cant, textvariable=self.var_cantidad, width=12).pack(pady=(2, 0))
 
-        ttk.Label(fila_nums, text="Precio unitario (S/):").pack(side="left", padx=(14, 0))
+        col_precio = ttk.Frame(f_nums)
+        col_precio.pack(side="left", padx=(0, 16))
+        ttk.Label(col_precio, text="Precio unitario (S/)",
+                  font=("Segoe UI", 9, "bold")).pack(anchor="w")
         self.var_precio = tk.StringVar()
-        self.entry_precio = ttk.Entry(fila_nums, textvariable=self.var_precio, width=10)
-        self.entry_precio.pack(side="left", padx=6)
-        self.lbl_precio_hint = ttk.Label(fila_nums, text="", foreground="#636B3F",
-                                          font=("Segoe UI", 8))
-        self.lbl_precio_hint.pack(side="left", padx=(4, 0))
+        ttk.Entry(col_precio, textvariable=self.var_precio, width=12).pack(pady=(2, 0))
+        self.lbl_precio_hint = ttk.Label(col_precio, text="",
+                                          foreground=COLOR_TEXTO_SECUNDARIO,
+                                          font=("Segoe UI", 8, "italic"))
+        self.lbl_precio_hint.pack(anchor="w")
 
-        fila_venc = ttk.Frame(sep)
-        fila_venc.pack(fill="x", pady=(0, 4))
-        ttk.Label(fila_venc, text="Fecha de vencimiento (AAAA-MM-DD, opcional):").pack(side="left")
+        col_venc = ttk.Frame(f_nums)
+        col_venc.pack(side="left")
+        ttk.Label(col_venc, text="Vencimiento (AAAA-MM-DD)",
+                  font=("Segoe UI", 9)).pack(anchor="w")
         self.var_fecha_vencimiento = tk.StringVar()
-        ttk.Entry(fila_venc, textvariable=self.var_fecha_vencimiento, width=14).pack(
-            side="left", padx=6)
-        ttk.Button(fila_venc, text="+ Agregar a la orden",
-                   command=self._agregar_item).pack(side="left", padx=12)
+        ttk.Entry(col_venc, textvariable=self.var_fecha_vencimiento, width=14).pack(pady=(2, 0))
+        ttk.Label(col_venc, text="Opcional",
+                  style="CampoAuto.TLabel").pack(anchor="w")
 
-        # ── Tabla con los productos ya agregados ─────────────────
-        ttk.Label(contenedor, text="Productos en esta orden de compra:").pack(
-            anchor="w", pady=(10, 2))
-        contenedor_tabla = ttk.Frame(contenedor)
+        ttk.Button(sec_prod, text="＋  Agregar a la orden",
+                   command=self._agregar_item).pack(anchor="w", pady=(4, 0))
+
+        # ── Tabla de items ─────────────────────────────────────────
+        sec_tabla = SeccionFormulario(cuerpo, "Productos en esta orden")
+        sec_tabla.pack(fill="both", expand=True, pady=(0, 10))
+
+        self.lbl_total = ttk.Label(sec_tabla, text="Total: S/ 0.00",
+                                    font=("Segoe UI", 14, "bold"),
+                                    foreground=COLOR_PRIMARIO)
+        self.lbl_total.pack(anchor="e", pady=(0, 4))
+
+        contenedor_tabla = ttk.Frame(sec_tabla)
         contenedor_tabla.pack(fill="both", expand=True)
         self.tabla_items = TablaDatos(
             contenedor_tabla,
-            ["Nombre del Producto", "Cantidad", "Precio Unitario (S/)", "Vence", "Subtotal (S/)"],
+            ["Producto", "Cantidad", "Precio Unit. (S/)", "Vence", "Subtotal (S/)"],
             con_id=False,
+            anchos={"Producto": 180, "Cantidad": 80, "Precio Unit. (S/)": 120,
+                    "Vence": 110, "Subtotal (S/)": 110}
         )
         self.tabla_items.empaquetar()
 
-        ttk.Button(contenedor, text="Guardar orden de compra completa",
-                   command=self._guardar_orden).pack(fill="x", pady=(10, 0))
+        # ── Botones finales ────────────────────────────────────────
+        fila_btn = ttk.Frame(cuerpo)
+        fila_btn.pack(fill="x")
+        ttk.Label(fila_btn, text="* Campos obligatorios",
+                  style="CampoAuto.TLabel").pack(side="left")
+        ttk.Button(fila_btn, text="Cancelar", style="Secundario.TButton",
+                   command=self.destroy).pack(side="right", padx=(8, 0))
+        ttk.Button(fila_btn, text="💾  Guardar orden de compra",
+                   command=self._guardar_orden).pack(side="right")
 
-        ajustar_ventana_a_contenido(self, ancho=720)
+        self.bind("<Escape>", lambda e: self.destroy())
+        centrar_ventana(self, 760, 620)
 
     def _autocompletar_precio(self, evento=None):
-        """Rellena el precio unitario con el último precio de compra del producto."""
         if not self.combo_producto.get():
             return
         producto_id = int(self.combo_producto.get().split(" — ")[0])
         ultimo = self._ultimos_precios.get(producto_id)
         if ultimo:
             self.var_precio.set(f"{ultimo:.2f}")
-            self.lbl_precio_hint.config(text=f"↑ último precio registrado")
+            self.lbl_precio_hint.config(text="↑ último precio registrado")
         else:
             self.var_precio.set("")
             self.lbl_precio_hint.config(text="(sin compra previa)")
 
     def _agregar_item(self):
         if not self.combo_producto.get():
-            messagebox.showwarning("Aviso", "Selecciona un producto.")
+            self._msg.mostrar("Selecciona un producto antes de agregar.", "advertencia")
             return
         try:
             cantidad = float(self.var_cantidad.get())
             precio = float(self.var_precio.get())
-            if cantidad <= 0 or precio < 0:
-                raise ValueError
+            if cantidad <= 0:
+                raise ValueError("cantidad negativa")
+            if precio < 0:
+                raise ValueError("precio negativo")
         except ValueError:
-            messagebox.showwarning("Aviso",
-                                    "La cantidad y el precio deben ser números válidos y positivos.")
+            self._msg.mostrar(
+                "La cantidad debe ser mayor que 0 y el precio debe ser un número válido.",
+                "error")
             return
 
         texto_fecha = self.var_fecha_vencimiento.get().strip()
@@ -298,10 +392,9 @@ class VentanaNuevaOrden(tk.Toplevel):
             try:
                 fecha_vencimiento = datetime.strptime(texto_fecha, "%Y-%m-%d").date()
             except ValueError:
-                messagebox.showwarning(
-                    "Aviso",
-                    "La fecha de vencimiento debe tener el formato AAAA-MM-DD "
-                    "(por ejemplo: 2027-06-30).")
+                self._msg.mostrar(
+                    "Formato de fecha incorrecto. Usa AAAA-MM-DD (ej: 2027-06-30).",
+                    "error")
                 return
 
         producto_id = int(self.combo_producto.get().split(" — ")[0])
@@ -309,18 +402,22 @@ class VentanaNuevaOrden(tk.Toplevel):
             "producto_id": producto_id, "cantidad": cantidad,
             "precio_unitario": precio, "fecha_vencimiento": fecha_vencimiento,
         })
+        self._msg.mostrar("Producto agregado a la orden.", "exito", 2000)
         self._refrescar_tabla_items()
         self.var_cantidad.set("")
         self.var_precio.set("")
         self.var_fecha_vencimiento.set("")
         self.lbl_precio_hint.config(text="")
+        self.combo_producto.set("")
 
     def _refrescar_tabla_items(self):
         filas = []
+        total = 0.0
         with nueva_sesion() as db:
             for item in self.items_agregados:
                 producto = db.get(Producto, item["producto_id"])
                 subtotal = item["cantidad"] * item["precio_unitario"]
+                total += subtotal
                 filas.append([
                     producto.nombre,
                     item["cantidad"],
@@ -329,13 +426,14 @@ class VentanaNuevaOrden(tk.Toplevel):
                     f"S/ {subtotal:.2f}",
                 ])
         self.tabla_items.cargar_filas(filas)
+        self.lbl_total.config(text=f"Total: S/ {total:,.2f}")
 
     def _guardar_orden(self):
         if not self.combo_proveedor.get():
-            messagebox.showwarning("Aviso", "Selecciona un proveedor.")
+            self._msg.mostrar("Selecciona un proveedor para la orden.", "error")
             return
         if not self.items_agregados:
-            messagebox.showwarning("Aviso", "Agrega al menos un producto a la orden.")
+            self._msg.mostrar("Agrega al menos un producto a la orden antes de guardar.", "error")
             return
 
         proveedor_id = int(self.combo_proveedor.get().split(" — ")[0])
@@ -345,13 +443,20 @@ class VentanaNuevaOrden(tk.Toplevel):
                 items=self.items_agregados,
                 usuario_id=sesion_actual.usuario_id,
             )
-            messagebox.showinfo(
-                "Orden registrada",
-                f"Orden {orden.numero} guardada correctamente.\n"
-                f"El stock del inventario fue actualizado.")
         except Exception as error:
-            messagebox.showerror("Error al guardar", str(error))
+            messagebox.showerror(
+                "No se pudo registrar la orden",
+                f"Ocurrió un error al guardar la orden de compra.\n\n"
+                f"Detalle: {error}\n\n"
+                f"Verifica los datos e inténtalo nuevamente.")
             return
 
+        messagebox.showinfo(
+            "✓ Orden registrada correctamente",
+            f"La orden {orden.numero} fue guardada.\n"
+            f"Proveedor: {self.combo_proveedor.get().split(' — ')[1]}\n"
+            f"Productos: {len(self.items_agregados)}\n"
+            f"El stock del inventario fue actualizado."
+        )
         self.al_guardar()
         self.destroy()
