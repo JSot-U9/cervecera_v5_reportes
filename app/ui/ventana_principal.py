@@ -1,24 +1,28 @@
-"""
-ventana_principal.py
-=====================
-Ventana principal del ERP con sidebar mejorado:
-- Estado activo persistente (no solo hover)
-- Información de usuario/rol en la parte inferior
-- Barra de estado inferior
-- Etiquetas simplificadas de módulos
+"""ventana_principal.py (PySide6)
+==================================
+Ventana principal del ERP: sidebar de navegación a la izquierda +
+área de contenido (QStackedWidget) a la derecha, más la barra de
+estado inferior.
+
+Todos los módulos están migrados a PySide6, incluido el sistema de
+tutorial interactivo (con transparencia real en el overlay).
 """
 
-import tkinter as tk
-from tkinter import ttk
+from PySide6.QtCore import Qt, QTimer
+from PySide6.QtGui import QKeySequence, QShortcut
+from PySide6.QtWidgets import (
+    QMainWindow, QWidget, QFrame, QVBoxLayout, QHBoxLayout, QLabel,
+    QPushButton, QStackedWidget,
+)
 
 from app.sesion import sesion_actual
 from app.seguridad import modulos_visibles
 from app.logica_autenticacion import cerrar_sesion
 from app.logica_configuracion import obtener_parametro
-from app.ui.estilos import aplicar_estilos, COLOR_SIDEBAR, COLOR_PRIMARIO, COLOR_SIDEBAR_SELECCIONADO
+from app.ui.estilos import fuente, poner_clase
 from app.ui.logo import cargar_logo
 from app.ui.widgets import BarraEstado
-from app.ui.dialogo_creditos import mostrar_creditos
+from app.ui.tutorial import abrir_centro_ayuda, tal_vez_iniciar_tutorial_general
 
 from app.ui.vista_dashboard import VistaDashboard
 from app.ui.vista_compras import VistaCompras
@@ -28,7 +32,6 @@ from app.ui.vista_ventas import VistaVentas
 from app.ui.vista_costos import VistaCostos
 from app.ui.vista_admin import VistaAdmin
 
-# Módulos: (clave, ícono, etiqueta, clase)
 DEFINICION_MODULOS = [
     ("dashboard",  "🏠", "Inicio",         VistaDashboard),
     ("compras",    "🛒", "Compras",         VistaCompras),
@@ -40,149 +43,188 @@ DEFINICION_MODULOS = [
 ]
 
 
-class VentanaPrincipal(tk.Tk):
+class VentanaPrincipal(QMainWindow):
     def __init__(self):
         super().__init__()
 
         self._nombre_empresa = obtener_parametro("empresa_nombre", "Sistema de Gestión")
-        self.title(
-            f"{self._nombre_empresa}  —  "
-            f"{sesion_actual.nombre_completo} [{sesion_actual.rol}]"
+        self.setWindowTitle(
+            f"{self._nombre_empresa}  —  {sesion_actual.nombre_completo} [{sesion_actual.rol}]"
         )
-        self.geometry("1280x760")
-        self.minsize(1000, 640)
-        aplicar_estilos(self)
+        self.resize(1280, 760)
+        self.setMinimumSize(1000, 640)
 
         self.quiere_reiniciar_login = False
         self._modulos_permitidos = modulos_visibles(sesion_actual.rol)
-        self._botones_menu: dict[str, ttk.Button] = {}
+        self._botones_menu: dict = {}
         self._vistas: dict = {}
         self._clave_activa: str = ""
 
-        # Atajos de teclado globales
-        self.bind("<F5>", lambda e: self._refrescar_activo())
+        QShortcut(QKeySequence("F5"), self).activated.connect(self._refrescar_activo)
 
-        # Layout principal: sidebar | contenido
-        contenedor_principal = ttk.Frame(self)
-        contenedor_principal.pack(fill="both", expand=True)
+        central = QWidget()
+        self.setCentralWidget(central)
+        layout_central = QVBoxLayout(central)
+        layout_central.setContentsMargins(0, 0, 0, 0)
+        layout_central.setSpacing(0)
 
-        self._crear_sidebar(contenedor_principal)
-        self._area_contenido = ttk.Frame(contenedor_principal)
-        self._area_contenido.pack(side="left", fill="both", expand=True)
+        fila = QHBoxLayout()
+        fila.setContentsMargins(0, 0, 0, 0)
+        fila.setSpacing(0)
+        layout_central.addLayout(fila, stretch=1)
 
-        # Barra de estado inferior
-        barra_estado = BarraEstado(
-            self,
-            usuario=sesion_actual.nombre_completo,
-            rol=sesion_actual.rol
-        )
-        barra_estado.pack(side="bottom", fill="x")
+        self._crear_sidebar(fila)
+
+        self._stack = QStackedWidget()
+        fila.addWidget(self._stack, stretch=1)
+
+        barra_estado = BarraEstado(usuario=sesion_actual.nombre_completo, rol=sesion_actual.rol)
+        layout_central.addWidget(barra_estado)
 
         self._crear_vistas()
         self._navegar("dashboard")
 
+        # Al terminar de construir la ventana, revisa si corresponde
+        # mostrar el tour general (primer ingreso de este usuario).
+        QTimer.singleShot(600, lambda: tal_vez_iniciar_tutorial_general(self))
+
     # ── Sidebar ───────────────────────────────────────────────────
-    def _crear_sidebar(self, parent):
-        sidebar = ttk.Frame(parent, width=230, style="Sidebar.TFrame")
-        sidebar.pack(side="left", fill="y")
-        sidebar.pack_propagate(False)
+    def _crear_sidebar(self, layout_padre):
+        from app.ui.estilos import COLOR_SIDEBAR, COLOR_TARJETA, fondo
 
-        # Logo y nombre de empresa
-        tarjeta_logo = ttk.Frame(sidebar, style="Tarjeta.TFrame", padding=(10, 10))
-        tarjeta_logo.pack(padx=12, pady=(12, 4), fill="x")
-        self._imagen_logo_sidebar = cargar_logo(self, tamano="chico")
-        ttk.Label(tarjeta_logo, image=self._imagen_logo_sidebar,
-                  style="Tarjeta.TLabel").pack()
+        sidebar = QFrame()
+        sidebar.setFixedWidth(230)
+        fondo(sidebar, COLOR_SIDEBAR)
+        self._sidebar = sidebar
+        layout_padre.addWidget(sidebar)
 
-        ttk.Label(
-            sidebar,
-            text=self._nombre_empresa,
-            style="SidebarTitulo.TLabel",
-            wraplength=200,
-            justify="center",
-            anchor="center",
-        ).pack(pady=(4, 8), padx=8)
+        sl = QVBoxLayout(sidebar)
+        sl.setContentsMargins(12, 12, 12, 10)
+        sl.setSpacing(2)
 
-        # Separador
-        sep1 = tk.Frame(sidebar, bg="#3D4F28", height=1)
-        sep1.pack(fill="x", padx=12, pady=(0, 6))
+        tarjeta_logo = QFrame()
+        fondo(tarjeta_logo, COLOR_TARJETA, "border-radius: 6px;")
+        tl = QVBoxLayout(tarjeta_logo)
+        tl.setContentsMargins(10, 10, 10, 10)
+        lbl_logo = QLabel()
+        lbl_logo.setPixmap(cargar_logo("chico"))
+        lbl_logo.setAlignment(Qt.AlignCenter)
+        tl.addWidget(lbl_logo)
+        sl.addWidget(tarjeta_logo)
+        sl.addSpacing(4)
 
-        # Botones de navegación
-        for clave, icono, etiqueta, _clase in DEFINICION_MODULOS:
+        lbl_empresa = QLabel(self._nombre_empresa)
+        lbl_empresa.setStyleSheet("background: transparent; color: white;")
+        lbl_empresa.setFont(fuente(11, negrita=True))
+        lbl_empresa.setAlignment(Qt.AlignCenter)
+        lbl_empresa.setWordWrap(True)
+        sl.addWidget(lbl_empresa)
+        sl.addSpacing(8)
+
+        sl.addWidget(self._separador())
+
+        for clave, icono, etiqueta, _fabrica in DEFINICION_MODULOS:
             if clave not in self._modulos_permitidos:
                 continue
-            texto = f"{icono}   {etiqueta}"
-            boton = ttk.Button(
-                sidebar,
-                text=texto,
-                style="Sidebar.TButton",
-                command=lambda c=clave: self._navegar(c)
-            )
-            boton.pack(fill="x", padx=8, pady=2)
+            boton = QPushButton(f"{icono}   {etiqueta}")
+            poner_clase(boton, "sidebar")
+            boton.clicked.connect(lambda checked=False, c=clave: self._navegar(c))
+            sl.addWidget(boton)
             self._botones_menu[clave] = boton
 
-        # Relleno flexible
-        ttk.Frame(sidebar, style="Sidebar.TFrame").pack(fill="both", expand=True)
+        sl.addStretch()
 
-        # Separador antes de usuario
-        sep2 = tk.Frame(sidebar, bg="#3D4F28", height=1)
-        sep2.pack(fill="x", padx=12, pady=8)
+        sl.addWidget(self._separador())
 
-        # Sección usuario
-        frame_usuario = ttk.Frame(sidebar, style="Sidebar.TFrame", padding=(12, 6))
-        frame_usuario.pack(fill="x")
+        lbl_usuario = QLabel("👤  " + sesion_actual.nombre_completo)
+        lbl_usuario.setStyleSheet("background: transparent; color: white;")
+        lbl_usuario.setFont(fuente(9, negrita=True))
+        lbl_usuario.setWordWrap(True)
+        sl.addWidget(lbl_usuario)
+        lbl_rol = QLabel(sesion_actual.rol)
+        from app.ui.estilos import COLOR_PRIMARIO_CLARO
+        lbl_rol.setStyleSheet(f"background: transparent; color: {COLOR_PRIMARIO_CLARO};")
+        lbl_rol.setFont(fuente(8, negrita=True))
+        sl.addWidget(lbl_rol)
+        sl.addSpacing(6)
 
-        ttk.Label(frame_usuario, text="👤  " + sesion_actual.nombre_completo,
-                  style="SidebarTitulo.TLabel",
-                  font=("Segoe UI", 9, "bold"),
-                  wraplength=190).pack(anchor="w")
-        ttk.Label(frame_usuario, text=sesion_actual.rol,
-                  style="SidebarRol.TLabel").pack(anchor="w", pady=(0, 6))
+        self._btn_ayuda = QPushButton("❓  Ayuda y tutorial")
+        poner_clase(self._btn_ayuda, "secundario")
+        self._btn_ayuda.clicked.connect(self._abrir_ayuda)
+        sl.addWidget(self._btn_ayuda)
 
-        ttk.Button(
-            sidebar,
-            text="ℹ️  Créditos",
-            style="Secundario.TButton",
-            command=lambda: mostrar_creditos(self)
-        ).pack(fill="x", padx=8, pady=(0, 4))
+        btn_creditos = QPushButton("ℹ️  Créditos")
+        poner_clase(btn_creditos, "secundario")
+        btn_creditos.clicked.connect(lambda: mostrar_creditos(self))
+        sl.addWidget(btn_creditos)
 
-        ttk.Button(
-            sidebar,
-            text="🚪  Cerrar sesión",
-            style="Peligro.TButton",
-            command=self._cerrar_sesion
-        ).pack(fill="x", padx=8, pady=(0, 10))
+        btn_salir = QPushButton("🚪  Cerrar sesión")
+        poner_clase(btn_salir, "peligro")
+        btn_salir.clicked.connect(self._cerrar_sesion)
+        sl.addWidget(btn_salir)
+
+    def _separador(self) -> QFrame:
+        from app.ui.estilos import fondo
+        sep = QFrame()
+        sep.setFixedHeight(1)
+        fondo(sep, "#3D4F28")
+        return sep
+
+    def _abrir_ayuda(self):
+        abrir_centro_ayuda(self)
 
     # ── Vistas ────────────────────────────────────────────────────
     def _crear_vistas(self):
-        for clave, _icono, _texto, clase_vista in DEFINICION_MODULOS:
+        for clave, _icono, _texto, fabrica in DEFINICION_MODULOS:
             if clave not in self._modulos_permitidos:
                 continue
-            vista = clase_vista(self._area_contenido)
-            vista.place(relx=0, rely=0, relwidth=1, relheight=1)
+            vista = fabrica()
+            self._stack.addWidget(vista)
             self._vistas[clave] = vista
 
     def _navegar(self, clave: str):
         if clave not in self._vistas:
             return
-        # Restaurar estilo del botón anterior
         if self._clave_activa and self._clave_activa in self._botones_menu:
-            self._botones_menu[self._clave_activa].configure(style="Sidebar.TButton")
-        # Marcar botón activo
+            poner_clase(self._botones_menu[self._clave_activa], "sidebar")
         if clave in self._botones_menu:
-            self._botones_menu[clave].configure(style="SidebarActivo.TButton")
+            poner_clase(self._botones_menu[clave], "sidebarActivo")
         self._clave_activa = clave
-        self._vistas[clave].tkraise()
+        self._stack.setCurrentWidget(self._vistas[clave])
         if hasattr(self._vistas[clave], "refrescar"):
             self._vistas[clave].refrescar()
 
+    # ── API pública ───────────────────────────────────────────────
+    def navegar(self, clave: str):
+        self._navegar(clave)
+
+    def obtener_vista(self, clave: str):
+        return self._vistas.get(clave)
+
+    def vista_activa(self):
+        return self._vistas.get(self._clave_activa)
+
+    def boton_menu(self, clave: str):
+        return self._botones_menu.get(clave)
+
+    def widget_sidebar(self):
+        return self._sidebar
+
+    def boton_ayuda(self):
+        return self._btn_ayuda
+
+    def nombre_empresa(self) -> str:
+        return self._nombre_empresa
+
+    def modulos_permitidos(self) -> set:
+        return set(self._modulos_permitidos)
+
     def _refrescar_activo(self):
-        if self._clave_activa and self._clave_activa in self._vistas:
-            vista = self._vistas[self._clave_activa]
-            if hasattr(vista, "refrescar"):
-                vista.refrescar()
+        vista = self._vistas.get(self._clave_activa)
+        if vista is not None and hasattr(vista, "refrescar"):
+            vista.refrescar()
 
     def _cerrar_sesion(self):
         cerrar_sesion()
         self.quiere_reiniciar_login = True
-        self.destroy()
+        self.close()

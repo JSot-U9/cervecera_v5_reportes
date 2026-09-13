@@ -3,15 +3,5 @@ reportlab>=4.0.0,<5.0.0
 openpyxl>=3.1.0,<4.0.0
 pytest>=7.0.0,<9.0.0
 
-# ttkbootstrap: temas modernos ("flat design") para los widgets ttk.
-# Se fija a la serie 1.x a propósito: es la API estable y documentada,
-# compatible con crear varias ventanas raíz (tk.Tk) sucesivas como
-# hace este proyecto (login -> ventana principal). La serie 2.x cambia
-# esa API y no se ha probado aquí. Trae Pillow como dependencia propia,
-# no hace falta listarlo aparte.
-ttkbootstrap>=1.10.1,<2.0.0
-
-# Nota: la interfaz gráfica usa Tkinter, que ya viene incluido con
-# Python (no aparece aquí porque no se instala con pip). En algunas
-# instalaciones de Linux hay que instalarlo aparte con el gestor de
-# paquetes del sistema, por ejemplo:  sudo apt install python3-tk
+# Interfaz gráfica: PySide6 (Qt para Python, licencia LGPL).
+PySide6>=6.5.0,<7.0.0

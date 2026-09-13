@@ -212,7 +212,44 @@ gráficos de barras nativamente con `reportlab.graphics.charts`).
 del stock mínimo (ya existe la función `productos_bajo_minimo()` en
 `logica_inventario.py` — solo falta decidir cómo avisar).
 
-## 11. ¿Y de dónde salen los colores?
+## 12. El módulo de tutorial interactivo: cómo funciona
+
+Vive en `app/ui/tutorial*.py`, dividido en 4 archivos con una única
+responsabilidad cada uno:
+
+| Archivo                  | Responsabilidad                                                                 |
+| ------------------------- | -------------------------------------------------------------------------------- |
+| `tutorial_data.py`        | **Contenido declarativo**: la lista de pasos de cada tutorial, el guardado del progreso del usuario y los textos de ayuda contextual. Agregar o cambiar un tutorial es, casi siempre, solo tocar este archivo. |
+| `tutorial_overlay.py`     | **Motor visual**: oscurece la pantalla alrededor del control que se explica y muestra la tarjeta con el texto. No sabe nada de "Compras" ni de "roles" — solo sabe resaltar un widget de Tkinter. |
+| `tutorial.py`             | **Orquestador**: recorre los pasos de un tutorial con el overlay, maneja la navegación entre módulos, y contiene el panel «❓ Ayuda y tutorial». |
+| `tutorial_practice.py`    | **Modo práctico**: el ejemplo de "aprender haciendo" en Compras — un checklist que detecta acciones reales del usuario sobre el formulario real. |
+
+**¿Cómo sabe el tutorial qué widget resaltar?** Cada vista (`VistaCompras`,
+`VistaInventario`, etc.) expone un diccionario `self.tutorial_targets`
+con sus controles reales (por ejemplo `tutorial_targets["btn_reporte"]`
+apunta al botón de reporte real). Los pasos de `tutorial_data.py` piden
+esos controles por nombre — si algún control no existe (por ejemplo,
+porque el rol actual no tiene permiso para crearlo), el paso
+simplemente se muestra sin resaltar nada, en vez de romper la app.
+
+**¿Cómo respeta los roles?** Reutiliza `seguridad.modulos_visibles(rol)`
+— la misma función que decide qué botones aparecen en el sidebar — para
+filtrar qué tutoriales y qué pasos del tour general tienen sentido para
+cada usuario. No existe un segundo sistema de permisos.
+
+**¿Dónde se guarda el progreso?** En la misma tabla `ParametroSistema`
+que ya usa el resto del sistema (ver `logica_configuracion.py`), como
+un JSON por usuario y por tutorial. No se creó ninguna tabla nueva.
+
+**Para agregar un tutorial de un módulo nuevo**, solo hace falta:
+1. Exponer los controles relevantes en `self.tutorial_targets` desde
+   la vista de ese módulo.
+2. Escribir la lista de `PasoTutorial` en `tutorial_data.py` y
+   registrarla en `TUTORIALES_MODULO`.
+
+No hace falta tocar `tutorial.py` ni `tutorial_overlay.py`.
+
+## 13. ¿Y de dónde salen los colores?
 
 Todo el color de la aplicación (el ámbar del menú, el marrón del
 sidebar, el rojo de las alertas...) vive en **un solo archivo**: `app/ui/estilos.py`. Cada pantalla no define sus propios colores;

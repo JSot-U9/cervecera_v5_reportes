@@ -1,142 +1,131 @@
-"""
-vista_dashboard.py
-===================
+"""vista_dashboard.py (PySide6)
+================================
 Centro de operaciones: KPIs, alertas accionables y resumen operacional.
 """
 
-import tkinter as tk
-from tkinter import ttk
 from datetime import date
+
+from PySide6.QtCore import Qt
+from PySide6.QtWidgets import (
+    QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QLabel,
+    QScrollArea,
+)
 
 from app.basedatos import nueva_sesion
 from app.modelos import Producto, Proveedor, Cliente, OrdenVenta, OrdenProduccion
 from app.logica_inventario import productos_bajo_minimo, lotes_proximos_a_vencer
 from app.logica_configuracion import obtener_parametro_numerico
-from app.ui.widgets import EncabezadoModulo, TarjetaKPI, MensajeEstado
-from app.ui.estilos import (
-    COLOR_ALERTA, COLOR_EXITO, COLOR_ADVERTENCIA,
-    COLOR_TEXTO_SECUNDARIO, COLOR_FONDO, COLOR_PRIMARIO, COLOR_TARJETA
-)
+from app.ui.widgets import EncabezadoModulo, TarjetaKPI, PanelTitulado
+from app.ui.estilos import COLOR_ALERTA, COLOR_EXITO, COLOR_ADVERTENCIA, COLOR_TEXTO_SECUNDARIO, fuente
 
 
-class VistaDashboard(ttk.Frame):
-    def __init__(self, parent):
+class VistaDashboard(QWidget):
+    def __init__(self, parent=None):
         super().__init__(parent)
-        EncabezadoModulo(
-            self,
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+
+        layout.addWidget(EncabezadoModulo(
             "Inicio — Panel de Control",
             "Resumen general de operaciones, alertas y estado del negocio",
             icono="🏠",
-        ).pack(fill="x")
+        ))
 
-        # Área con scroll para el contenido
-        self._canvas = tk.Canvas(self, bg=COLOR_FONDO, highlightthickness=0)
-        scrollbar = ttk.Scrollbar(self, orient="vertical", command=self._canvas.yview)
-        self._canvas.configure(yscrollcommand=scrollbar.set)
-        scrollbar.pack(side="right", fill="y")
-        self._canvas.pack(side="left", fill="both", expand=True)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QScrollArea.NoFrame)
+        layout.addWidget(scroll, stretch=1)
 
-        self._cuerpo = ttk.Frame(self._canvas, padding=(20, 16))
-        self._cuerpo_id = self._canvas.create_window((0, 0), window=self._cuerpo, anchor="nw")
-        self._cuerpo.bind("<Configure>", self._on_cuerpo_configure)
-        self._canvas.bind("<Configure>", self._on_canvas_configure)
+        cuerpo = QWidget()
+        scroll.setWidget(cuerpo)
+        self._cuerpo_layout = QVBoxLayout(cuerpo)
+        self._cuerpo_layout.setContentsMargins(20, 16, 20, 16)
+        self._cuerpo_layout.setSpacing(6)
 
         self._construir_ui()
         self.refrescar()
 
-    def _on_cuerpo_configure(self, event):
-        self._canvas.configure(scrollregion=self._canvas.bbox("all"))
-
-    def _on_canvas_configure(self, event):
-        self._canvas.itemconfig(self._cuerpo_id, width=event.width)
+    def _titulo_seccion(self, texto: str) -> QLabel:
+        lbl = QLabel(texto)
+        lbl.setFont(fuente(9, negrita=True))
+        lbl.setStyleSheet(f"color: {COLOR_TEXTO_SECUNDARIO};")
+        return lbl
 
     def _construir_ui(self):
-        cuerpo = self._cuerpo
+        cl = self._cuerpo_layout
 
-        # ── Sección: Indicadores principales ──────────────────────
-        lbl_seccion1 = ttk.Label(cuerpo, text="INDICADORES GENERALES",
-                                  font=("Segoe UI", 9, "bold"),
-                                  foreground=COLOR_TEXTO_SECUNDARIO)
-        lbl_seccion1.pack(anchor="w", pady=(0, 6))
-
-        fila1 = ttk.Frame(cuerpo)
-        fila1.pack(fill="x", pady=(0, 4))
-        fila1.columnconfigure((0, 1, 2, 3), weight=1)
-
-        self.kpi_productos = TarjetaKPI(fila1, "Productos activos", icono="📦")
-        self.kpi_proveedores = TarjetaKPI(fila1, "Proveedores registrados", icono="🏭")
-        self.kpi_clientes = TarjetaKPI(fila1, "Clientes registrados", icono="👥")
-        self.kpi_ventas = TarjetaKPI(fila1, "Órdenes de venta", icono="🧾")
+        cl.addWidget(self._titulo_seccion("INDICADORES GENERALES"))
+        fila1 = QGridLayout()
+        fila1.setSpacing(8)
+        self.kpi_productos = TarjetaKPI("Productos activos", icono="📦")
+        self.kpi_proveedores = TarjetaKPI("Proveedores registrados", icono="🏭")
+        self.kpi_clientes = TarjetaKPI("Clientes registrados", icono="👥")
+        self.kpi_ventas = TarjetaKPI("Órdenes de venta", icono="🧾")
         for i, t in enumerate((self.kpi_productos, self.kpi_proveedores,
                                 self.kpi_clientes, self.kpi_ventas)):
-            t.grid(row=0, column=i, sticky="nsew", padx=4, pady=4)
+            fila1.addWidget(t, 0, i)
+            fila1.setColumnStretch(i, 1)
+        cl.addLayout(fila1)
+        cl.addSpacing(10)
 
-        # ── Sección: Alertas e indicadores clave ──────────────────
-        lbl_seccion2 = ttk.Label(cuerpo, text="ALERTAS Y ESTADO OPERACIONAL",
-                                  font=("Segoe UI", 9, "bold"),
-                                  foreground=COLOR_TEXTO_SECUNDARIO)
-        lbl_seccion2.pack(anchor="w", pady=(16, 6))
-
-        fila2 = ttk.Frame(cuerpo)
-        fila2.pack(fill="x", pady=(0, 4))
-        fila2.columnconfigure((0, 1, 2, 3), weight=1)
-
-        self.kpi_stock_bajo = TarjetaKPI(fila2, "Productos con stock bajo",
-                                          variante="alerta", icono="⚠️")
-        self.kpi_produccion_activa = TarjetaKPI(fila2, "Lotes en producción",
-                                                 variante="advertencia", icono="🍺")
-        self.kpi_por_vencer = TarjetaKPI(fila2, "Lotes por vencer (30 días)",
-                                          variante="alerta", icono="📅")
-        self.kpi_ingresos_mes = TarjetaKPI(fila2, "Ingresos del mes",
-                                            variante="exito", icono="💰")
+        cl.addWidget(self._titulo_seccion("ALERTAS Y ESTADO OPERACIONAL"))
+        fila2 = QGridLayout()
+        fila2.setSpacing(8)
+        self.kpi_stock_bajo = TarjetaKPI("Productos con stock bajo", variante="alerta", icono="⚠️")
+        self.kpi_produccion_activa = TarjetaKPI("Lotes en producción", variante="advertencia", icono="🍺")
+        self.kpi_por_vencer = TarjetaKPI("Lotes por vencer (30 días)", variante="alerta", icono="📅")
+        self.kpi_ingresos_mes = TarjetaKPI("Ingresos del mes", variante="exito", icono="💰")
         for i, t in enumerate((self.kpi_stock_bajo, self.kpi_produccion_activa,
                                 self.kpi_por_vencer, self.kpi_ingresos_mes)):
-            t.grid(row=0, column=i, sticky="nsew", padx=4, pady=4)
+            fila2.addWidget(t, 0, i)
+            fila2.setColumnStretch(i, 1)
+        cl.addLayout(fila2)
+        cl.addSpacing(10)
 
-        # ── Capital inicial ────────────────────────────────────────
-        fila3 = ttk.Frame(cuerpo)
-        fila3.pack(fill="x", pady=(4, 16))
-        self.kpi_capital_inicial = TarjetaKPI(fila3, "Capital inicial asignado (S/)")
-        self.kpi_capital_inicial.pack(side="left", padx=4)
-        ttk.Label(
-            fila3,
-            text="Monto de referencia con el que arrancó el negocio.\n"
-                 "No incluye ingresos ni egresos posteriores.",
-            foreground=COLOR_TEXTO_SECUNDARIO,
-            font=("Segoe UI", 9),
-        ).pack(side="left", padx=(12, 0))
-
-        # ── Panel de alertas accionables ───────────────────────────
-        self._frame_alertas = ttk.LabelFrame(
-            cuerpo,
-            text="  ⚠  Alertas de stock",
-            padding=(16, 12)
+        fila3 = QHBoxLayout()
+        self.kpi_capital_inicial = TarjetaKPI("Capital inicial asignado (S/)")
+        self.kpi_capital_inicial.setFixedWidth(220)
+        fila3.addWidget(self.kpi_capital_inicial)
+        lbl_capital = QLabel(
+            "Monto de referencia con el que arrancó el negocio.\n"
+            "No incluye ingresos ni egresos posteriores."
         )
-        self._frame_alertas.pack(fill="both", expand=True, pady=(0, 16))
-        self._contenido_alertas = ttk.Frame(self._frame_alertas)
-        self._contenido_alertas.pack(fill="both", expand=True)
+        lbl_capital.setStyleSheet(f"color: {COLOR_TEXTO_SECUNDARIO};")
+        lbl_capital.setFont(fuente(9))
+        fila3.addWidget(lbl_capital)
+        fila3.addStretch()
+        cl.addLayout(fila3)
+        cl.addSpacing(6)
 
-        # ── Panel de vencimientos próximos ─────────────────────────
-        self._frame_vencimientos = ttk.LabelFrame(
-            cuerpo,
-            text="  📅  Lotes próximos a vencer",
-            padding=(16, 12)
-        )
-        self._frame_vencimientos.pack(fill="both", expand=True)
-        self._contenido_vencimientos = ttk.Frame(self._frame_vencimientos)
-        self._contenido_vencimientos.pack(fill="both", expand=True)
+        self._grupo_alertas = PanelTitulado("⚠  Alertas de stock")
+        self._layout_alertas = self._grupo_alertas.layout_interior
+        cl.addWidget(self._grupo_alertas)
+
+        self._grupo_vencimientos = PanelTitulado("📅  Lotes próximos a vencer")
+        self._layout_vencimientos = self._grupo_vencimientos.layout_interior
+        cl.addWidget(self._grupo_vencimientos)
+
+        cl.addStretch()
+
+    def _limpiar_layout(self, layout):
+        while layout.count():
+            item = layout.takeAt(0)
+            w = item.widget()
+            if w is not None:
+                w.deleteLater()
 
     def refrescar(self):
         with nueva_sesion() as db:
-            n_productos         = db.query(Producto).filter_by(activo=True).count()
-            n_proveedores       = db.query(Proveedor).filter_by(activo=True).count()
-            n_clientes          = db.query(Cliente).filter_by(activo=True).count()
-            n_ventas            = db.query(OrdenVenta).count()
+            n_productos = db.query(Producto).filter_by(activo=True).count()
+            n_proveedores = db.query(Proveedor).filter_by(activo=True).count()
+            n_clientes = db.query(Cliente).filter_by(activo=True).count()
+            n_ventas = db.query(OrdenVenta).count()
             n_produccion_activa = db.query(OrdenProduccion).filter(
                 OrdenProduccion.estado.in_(["INICIADA", "EN_PROCESO"])
             ).count()
 
-            bajos      = productos_bajo_minimo(db)
+            bajos = productos_bajo_minimo(db)
             por_vencer = lotes_proximos_a_vencer(db, dias=30)
 
             hoy = date.today()
@@ -158,65 +147,54 @@ class VistaDashboard(ttk.Frame):
         self.kpi_ingresos_mes.actualizar(f"S/ {total_mes:,.2f}")
         self.kpi_capital_inicial.actualizar(f"S/ {capital_inicial:,.2f}")
 
-        # Actualizar panel de alertas
-        for w in self._contenido_alertas.winfo_children():
-            w.destroy()
+        self._limpiar_layout(self._layout_alertas)
         if bajos:
             for b in bajos:
-                fila = tk.Frame(self._contenido_alertas, bg=COLOR_FONDO)
-                fila.pack(fill="x", pady=2)
-                tk.Label(
-                    fila,
-                    text=f"🔴  {b['nombre']}",
-                    bg=COLOR_FONDO, fg=COLOR_ALERTA,
-                    font=("Segoe UI", 9, "bold"),
-                    anchor="w"
-                ).pack(side="left")
-                tk.Label(
-                    fila,
-                    text=f" — Stock actual: {b['stock']:.1f} {b['unidad']}  "
-                         f"(mínimo requerido: {b['minimo']})",
-                    bg=COLOR_FONDO, fg=COLOR_TEXTO_SECUNDARIO,
-                    font=("Segoe UI", 9),
-                    anchor="w"
-                ).pack(side="left")
+                fila = QHBoxLayout()
+                lbl1 = QLabel(f"🔴  {b['nombre']}")
+                lbl1.setStyleSheet(f"color: {COLOR_ALERTA};")
+                lbl1.setFont(fuente(9, negrita=True))
+                fila.addWidget(lbl1)
+                lbl2 = QLabel(f" — Stock actual: {b['stock']:.1f} {b['unidad']}  "
+                              f"(mínimo requerido: {b['minimo']})")
+                lbl2.setStyleSheet(f"color: {COLOR_TEXTO_SECUNDARIO};")
+                lbl2.setFont(fuente(9))
+                fila.addWidget(lbl2)
+                fila.addStretch()
+                contenedor = QWidget()
+                contenedor.setLayout(fila)
+                self._layout_alertas.addWidget(contenedor)
         else:
-            tk.Label(
-                self._contenido_alertas,
-                text="✅  Todos los productos tienen stock igual o superior al mínimo requerido.",
-                bg=COLOR_FONDO, fg=COLOR_EXITO,
-                font=("Segoe UI", 9),
-            ).pack(anchor="w")
+            lbl_ok = QLabel("✅  Todos los productos tienen stock igual o superior al mínimo requerido.")
+            lbl_ok.setStyleSheet(f"color: {COLOR_EXITO};")
+            lbl_ok.setFont(fuente(9))
+            self._layout_alertas.addWidget(lbl_ok)
 
-        # Actualizar panel de vencimientos
-        for w in self._contenido_vencimientos.winfo_children():
-            w.destroy()
+        self._limpiar_layout(self._layout_vencimientos)
         if por_vencer:
             for lote in por_vencer:
-                fila = tk.Frame(self._contenido_vencimientos, bg=COLOR_FONDO)
-                fila.pack(fill="x", pady=2)
+                fila = QHBoxLayout()
                 dias_restantes = (lote.fecha_vencimiento - date.today()).days if lote.fecha_vencimiento else "?"
-                color = COLOR_ALERTA if isinstance(dias_restantes, int) and dias_restantes <= 7 else COLOR_ADVERTENCIA
-                icono = "🔴" if isinstance(dias_restantes, int) and dias_restantes <= 7 else "🟡"
-                tk.Label(
-                    fila,
-                    text=f"{icono}  {getattr(lote, 'producto', lote).nombre if hasattr(lote, 'producto') else lote.numero}",
-                    bg=COLOR_FONDO, fg=color,
-                    font=("Segoe UI", 9, "bold"),
-                    anchor="w"
-                ).pack(side="left")
+                critico = isinstance(dias_restantes, int) and dias_restantes <= 7
+                color = COLOR_ALERTA if critico else COLOR_ADVERTENCIA
+                icono = "🔴" if critico else "🟡"
+                nombre = lote.producto.nombre if hasattr(lote, "producto") and lote.producto else lote.numero
+                lbl1 = QLabel(f"{icono}  {nombre}")
+                lbl1.setStyleSheet(f"color: {color};")
+                lbl1.setFont(fuente(9, negrita=True))
+                fila.addWidget(lbl1)
                 if lote.fecha_vencimiento:
-                    tk.Label(
-                        fila,
-                        text=f"  — Vence el {lote.fecha_vencimiento.strftime('%d/%m/%Y')}"
-                             f"  ({dias_restantes} días)",
-                        bg=COLOR_FONDO, fg=COLOR_TEXTO_SECUNDARIO,
-                        font=("Segoe UI", 9),
-                    ).pack(side="left")
+                    lbl2 = QLabel(f"  — Vence el {lote.fecha_vencimiento.strftime('%d/%m/%Y')}"
+                                  f"  ({dias_restantes} días)")
+                    lbl2.setStyleSheet(f"color: {COLOR_TEXTO_SECUNDARIO};")
+                    lbl2.setFont(fuente(9))
+                    fila.addWidget(lbl2)
+                fila.addStretch()
+                contenedor = QWidget()
+                contenedor.setLayout(fila)
+                self._layout_vencimientos.addWidget(contenedor)
         else:
-            tk.Label(
-                self._contenido_vencimientos,
-                text="✅  No hay lotes próximos a vencer en los próximos 30 días.",
-                bg=COLOR_FONDO, fg=COLOR_EXITO,
-                font=("Segoe UI", 9),
-            ).pack(anchor="w")
+            lbl_ok = QLabel("✅  No hay lotes próximos a vencer en los próximos 30 días.")
+            lbl_ok.setStyleSheet(f"color: {COLOR_EXITO};")
+            lbl_ok.setFont(fuente(9))
+            self._layout_vencimientos.addWidget(lbl_ok)

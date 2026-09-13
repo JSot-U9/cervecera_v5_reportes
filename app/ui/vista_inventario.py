@@ -1,213 +1,200 @@
-"""
-vista_inventario.py
-====================
-Módulo de Inventario — 4 pestañas con mejoras UX:
-- Estados visuales en tabla de stock
-- Filas coloreadas por estado
-- Encabezados simplificados
+"""vista_inventario.py (PySide6)
+=================================
+Stock actual · Lotes FIFO · Movimientos · Catálogo de productos.
 """
 
-import tkinter as tk
-from tkinter import ttk, messagebox
+from PySide6.QtCore import Qt
+from PySide6.QtWidgets import (
+    QWidget, QDialog, QVBoxLayout, QHBoxLayout, QGridLayout, QLabel,
+    QLineEdit, QComboBox, QPushButton, QTabWidget, QMessageBox,
+)
 
 from app.basedatos import nueva_sesion
-from app.modelos import Producto, LoteInventario
+from app.modelos import Producto, LoteInventario, MovimientoInventario
 from app.sesion import sesion_actual
 from app.seguridad import puede
 from app.logica_inventario import stock_total, ajustar_stock
 from app.ui.widgets import (
-    EncabezadoModulo, BarraBusqueda, TablaDatos, ajustar_ventana_a_contenido,
-    centrar_ventana, SeccionFormulario, MensajeEstado, formatear_estado
+    EncabezadoModulo, BarraBusqueda, TablaDatos, SeccionFormulario, MensajeEstado,
+    centrar_ventana, formatear_estado,
 )
-from app.ui.estilos import COLOR_TEXTO_SECUNDARIO, COLOR_PRIMARIO, COLOR_ALERTA, COLOR_EXITO
+from app.ui.estilos import COLOR_TEXTO_SECUNDARIO, COLOR_PRIMARIO, fuente, poner_clase, fondo
+
+_TEXTO_FIFO = (
+    "FIFO significa \"el primero en entrar es el primero en salir\". Cuando compras el "
+    "mismo insumo varias veces, cada compra crea un lote nuevo. Al usarlo en producción "
+    "(o venderlo), el sistema descuenta siempre del lote con la fecha de ingreso más "
+    "antigua antes de tocar los más nuevos."
+)
 
 
-class VistaInventario(ttk.Frame):
-    def __init__(self, parent):
+class VistaInventario(QWidget):
+    def __init__(self, parent=None):
         super().__init__(parent)
-        EncabezadoModulo(
-            self,
-            "Inventario",
-            "Stock actual · Lotes FIFO · Movimientos · Catálogo de productos",
+        self.tutorial_targets = {}
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        layout.addWidget(EncabezadoModulo(
+            "Inventario", "Stock actual · Lotes FIFO · Movimientos · Catálogo de productos",
             icono="📦",
-        ).pack(fill="x")
+        ))
 
-        notebook = ttk.Notebook(self)
-        notebook.pack(fill="both", expand=True, padx=12, pady=8)
+        self.notebook = QTabWidget()
+        layout.addWidget(self.notebook, stretch=1)
 
-        self._pestana_stock(notebook)
-        self._pestana_lotes(notebook)
-        self._pestana_movimientos(notebook)
-        self._pestana_catalogo(notebook)
+        self._pestana_stock()
+        self._pestana_lotes()
+        self._pestana_movimientos()
+        self._pestana_catalogo()
 
         self.refrescar()
 
-    def _pestana_stock(self, notebook):
-        pestana = ttk.Frame(notebook, padding=8)
-        notebook.add(pestana, text="  📊  Stock Actual  ")
+    def _pestana_stock(self):
+        pestana = QWidget()
+        pl = QVBoxLayout(pestana)
+        pl.setContentsMargins(10, 10, 10, 10)
+        self.notebook.addTab(pestana, "📊  Stock Actual")
 
-        barra = BarraBusqueda(pestana, al_escribir=lambda t: self.tabla_stock.filtrar(t),
+        barra = BarraBusqueda(al_escribir=lambda t: self.tabla_stock.filtrar(t),
                                placeholder="🔎  Buscar producto...")
-        barra.agregar_boton("📊  Reporte", self._abrir_dialogo_reporte,
-                             estilo="AccionSecundaria.TButton")
-        barra.pack(fill="x", pady=(0, 8))
+        self.tutorial_targets["btn_reporte"] = barra.agregar_boton(
+            "📊  Reporte", lambda: self._abrir_dialogo_reporte("stock"), estilo="accionSecundaria")
+        pl.addWidget(barra)
 
-        contenedor = ttk.Frame(pestana)
-        contenedor.pack(fill="both", expand=True)
         self.tabla_stock = TablaDatos(
-            contenedor,
             ["Código", "Nombre", "Tipo", "Stock", "Unidad", "Stock Mín.", "Estado"],
             anchos={"Código": 90, "Nombre": 180, "Tipo": 120, "Stock": 90,
                     "Unidad": 80, "Stock Mín.": 90, "Estado": 110},
         )
-        self.tabla_stock.empaquetar()
+        pl.addWidget(self.tabla_stock, stretch=1)
+        self.tutorial_targets["tabla_stock"] = self.tabla_stock
 
-    def _pestana_lotes(self, notebook):
-        pestana = ttk.Frame(notebook, padding=8)
-        notebook.add(pestana, text="  🗂  Lotes FIFO  ")
+    def _pestana_lotes(self):
+        pestana = QWidget()
+        pl = QVBoxLayout(pestana)
+        pl.setContentsMargins(10, 10, 10, 10)
+        self.notebook.addTab(pestana, "🗂  Lotes FIFO")
 
         puede_ajustar = puede(sesion_actual.rol, "inventario", "ajuste")
-        barra = BarraBusqueda(pestana, al_escribir=lambda t: self.tabla_lotes.filtrar(t),
+        barra = BarraBusqueda(al_escribir=lambda t: self.tabla_lotes.filtrar(t),
                                placeholder="🔎  Buscar lote...")
         if puede_ajustar:
-            barra.agregar_boton("⚖  Ajustar cantidad", self._abrir_ajuste,
-                                 estilo="AccionSecundaria.TButton")
-        barra.pack(fill="x", pady=(0, 6))
+            barra.agregar_boton("⚖  Ajustar cantidad", self._abrir_ajuste, estilo="accionSecundaria")
+        pl.addWidget(barra)
 
-        ttk.Label(
-            pestana,
-            text="Los lotes se consumen del más antiguo al más nuevo (FIFO). "
-                 "El sistema descuenta siempre del lote con la fecha de ingreso más temprana.",
-            foreground=COLOR_TEXTO_SECUNDARIO,
-            font=("Segoe UI", 8, "italic"),
-        ).pack(anchor="w", pady=(0, 6))
+        fila_fifo = QHBoxLayout()
+        lbl_fifo = QLabel(
+            "Los lotes se consumen del más antiguo al más nuevo (FIFO). El sistema "
+            "descuenta siempre del lote con la fecha de ingreso más temprana.")
+        lbl_fifo.setStyleSheet(f"color: {COLOR_TEXTO_SECUNDARIO};")
+        lbl_fifo.setFont(fuente(8, cursiva=True))
+        fila_fifo.addWidget(lbl_fifo)
+        btn_ayuda_fifo = QPushButton("❓")
+        btn_ayuda_fifo.setFixedWidth(30)
+        poner_clase(btn_ayuda_fifo, "secundario")
+        btn_ayuda_fifo.clicked.connect(
+            lambda: QMessageBox.information(self, "¿Qué es FIFO?", _TEXTO_FIFO))
+        fila_fifo.addWidget(btn_ayuda_fifo)
+        fila_fifo.addStretch()
+        pl.addLayout(fila_fifo)
 
-        contenedor = ttk.Frame(pestana)
-        contenedor.pack(fill="both", expand=True)
         self.tabla_lotes = TablaDatos(
-            contenedor,
             ["N° Lote", "Producto", "Ingresado", "Vencimiento", "Cantidad", "Estado"],
             anchos={"N° Lote": 130, "Producto": 170, "Ingresado": 110,
                     "Vencimiento": 110, "Cantidad": 90, "Estado": 120},
         )
-        self.tabla_lotes.empaquetar()
+        pl.addWidget(self.tabla_lotes, stretch=1)
+        self.tutorial_targets["tabla_lotes"] = self.tabla_lotes
 
-    def _pestana_movimientos(self, notebook):
-        pestana = ttk.Frame(notebook, padding=8)
-        notebook.add(pestana, text="  📋  Movimientos  ")
+    def _pestana_movimientos(self):
+        pestana = QWidget()
+        pl = QVBoxLayout(pestana)
+        pl.setContentsMargins(10, 10, 10, 10)
+        self.notebook.addTab(pestana, "📋  Movimientos")
 
-        barra = BarraBusqueda(pestana, al_escribir=lambda t: self.tabla_movimientos.filtrar(t),
+        barra = BarraBusqueda(al_escribir=lambda t: self.tabla_movimientos.filtrar(t),
                                placeholder="🔎  Buscar movimiento...")
-        barra.pack(fill="x", pady=(0, 8))
+        pl.addWidget(barra)
 
-        contenedor = ttk.Frame(pestana)
-        contenedor.pack(fill="both", expand=True)
         self.tabla_movimientos = TablaDatos(
-            contenedor,
             ["Producto", "Lote", "Tipo", "Cantidad", "Referencia", "Fecha"],
             anchos={"Producto": 160, "Lote": 120, "Tipo": 100,
                     "Cantidad": 80, "Referencia": 160, "Fecha": 130},
         )
-        self.tabla_movimientos.empaquetar()
+        pl.addWidget(self.tabla_movimientos, stretch=1)
+        self.tutorial_targets["tabla_movimientos"] = self.tabla_movimientos
 
-    def _pestana_catalogo(self, notebook):
-        pestana = ttk.Frame(notebook, padding=8)
-        notebook.add(pestana, text="  📦  Catálogo  ")
+    def _pestana_catalogo(self):
+        pestana = QWidget()
+        pl = QVBoxLayout(pestana)
+        pl.setContentsMargins(10, 10, 10, 10)
+        self.notebook.addTab(pestana, "📦  Catálogo")
 
         puede_editar = puede(sesion_actual.rol, "inventario", "entrada")
-        barra = BarraBusqueda(pestana, al_escribir=lambda t: self.tabla_catalogo.filtrar(t),
+        barra = BarraBusqueda(al_escribir=lambda t: self.tabla_catalogo.filtrar(t),
                                placeholder="🔎  Buscar en catálogo...")
         if puede_editar:
             barra.agregar_boton("＋  Nuevo producto", self._abrir_nuevo_producto)
-        barra.pack(fill="x", pady=(0, 8))
+        pl.addWidget(barra)
 
-        contenedor = ttk.Frame(pestana)
-        contenedor.pack(fill="both", expand=True)
         self.tabla_catalogo = TablaDatos(
-            contenedor,
             ["Código", "Nombre", "Tipo", "Unidad", "Precio Venta (S/)", "Stock Mín."],
             anchos={"Código": 90, "Nombre": 180, "Tipo": 120, "Unidad": 70,
                     "Precio Venta (S/)": 130, "Stock Mín.": 90},
         )
-        self.tabla_catalogo.empaquetar()
+        pl.addWidget(self.tabla_catalogo, stretch=1)
+        self.tutorial_targets["tabla_catalogo"] = self.tabla_catalogo
 
     def refrescar(self):
         with nueva_sesion() as db:
-            # Stock con estados visuales y colores
-            filas_stock = []
-            tags_stock = []
+            filas_stock, tags_stock = [], []
             for p in db.query(Producto).filter_by(activo=True).order_by(
                     Producto.tipo, Producto.nombre).all():
                 stock = stock_total(db, p.id)
                 if stock <= 0:
-                    estado = "🔴 Agotado"
-                    tag = "alerta"
+                    estado, tag = "🔴 Agotado", "alerta"
                 elif stock < p.stock_minimo:
-                    estado = "🟡 Stock bajo"
-                    tag = "advertencia"
+                    estado, tag = "🟡 Stock bajo", "advertencia"
                 else:
-                    estado = "🟢 Normal"
-                    tag = "exito"
+                    estado, tag = "🟢 Normal", "exito"
                 filas_stock.append([
-                    p.id, p.codigo, p.nombre, p.tipo,
-                    f"{stock:.2f}", p.unidad_medida or "—",
-                    f"{p.stock_minimo:.2f}", estado,
+                    p.id, p.codigo, p.nombre, p.tipo, f"{stock:.2f}",
+                    p.unidad_medida or "—", f"{p.stock_minimo:.2f}", estado,
                 ])
                 tags_stock.append(tag)
 
-            # Lotes FIFO con estados
-            filas_lotes = []
-            tags_lotes = []
+            filas_lotes, tags_lotes = [], []
             lotes = (db.query(LoteInventario)
-                     .order_by(LoteInventario.fecha_ingreso.asc(), LoteInventario.id.asc())
-                     .all())
-            for i, lote in enumerate(lotes):
+                     .order_by(LoteInventario.fecha_ingreso.asc(), LoteInventario.id.asc()).all())
+            for lote in lotes:
                 estado = formatear_estado(lote.estado)
-                tag = "normal" if i % 2 == 0 else "par"
-                if lote.estado == "VENCIDO":
-                    tag = "alerta"
-                elif lote.estado == "AGOTADO":
-                    tag = "alerta"
+                tag = "alerta" if lote.estado in ("VENCIDO", "AGOTADO") else "normal"
                 filas_lotes.append([
-                    lote.id,
-                    lote.numero_lote,
-                    lote.producto.nombre,
+                    lote.id, lote.numero_lote, lote.producto.nombre,
                     str(lote.fecha_ingreso),
                     str(lote.fecha_vencimiento) if lote.fecha_vencimiento else "—",
-                    f"{lote.cantidad_disponible:.2f}",
-                    estado,
+                    f"{lote.cantidad_disponible:.2f}", estado,
                 ])
                 tags_lotes.append(tag)
 
-            # Movimientos
             filas_movimientos = []
-            from app.modelos import MovimientoInventario
-            movimientos = (
-                db.query(MovimientoInventario)
-                .order_by(MovimientoInventario.fecha.desc())
-                .limit(300)
-                .all()
-            )
-            for i, m in enumerate(movimientos):
+            movimientos = (db.query(MovimientoInventario)
+                            .order_by(MovimientoInventario.fecha.desc()).limit(300).all())
+            for m in movimientos:
                 filas_movimientos.append([
-                    m.id,
-                    m.lote.producto.nombre if m.lote else "—",
-                    m.lote.numero_lote if m.lote else "—",
-                    m.tipo,
-                    f"{m.cantidad:.2f}",
-                    m.referencia or "—",
-                    str(m.fecha)[:16],
+                    m.id, m.lote.producto.nombre if m.lote else "—",
+                    m.lote.numero_lote if m.lote else "—", m.tipo,
+                    f"{m.cantidad:.2f}", m.referencia or "—", str(m.fecha)[:16],
                 ])
 
-            # Catálogo
             filas_catalogo = []
             for p in db.query(Producto).filter_by(activo=True).order_by(
                     Producto.tipo, Producto.nombre).all():
                 filas_catalogo.append([
-                    p.id, p.codigo, p.nombre, p.tipo,
-                    p.unidad_medida or "—",
-                    f"S/ {p.precio_venta:.2f}",
-                    f"{p.stock_minimo:.2f}",
+                    p.id, p.codigo, p.nombre, p.tipo, p.unidad_medida or "—",
+                    f"S/ {p.precio_venta:.2f}", f"{p.stock_minimo:.2f}",
                 ])
 
         self.tabla_stock.cargar_filas(filas_stock, tags_por_fila=tags_stock)
@@ -218,26 +205,28 @@ class VistaInventario(ttk.Frame):
     def _abrir_ajuste(self):
         lote_id = self.tabla_lotes.id_seleccionado()
         if not lote_id:
-            messagebox.showwarning("Aviso", "Selecciona un lote de la lista primero.")
+            QMessageBox.warning(self, "Aviso", "Selecciona un lote de la lista primero.")
             return
-        VentanaAjusteStock(self, lote_id, al_guardar=self.refrescar)
+        VentanaAjusteStock(self.window(), lote_id, al_guardar=self.refrescar).exec()
 
     def _abrir_nuevo_producto(self):
-        VentanaProducto(self, al_guardar=self.refrescar)
+        VentanaProducto(self.window(), al_guardar=self.refrescar).exec()
 
-    def _abrir_dialogo_reporte(self):
+    def _abrir_dialogo_reporte(self, clave="stock"):
         from app.ui.dialogo_reporte import DialogoReporte
-        DialogoReporte(self.winfo_toplevel(), modulo="stock")
+        dlg = DialogoReporte(self.window(), modulo=clave)
+        dlg.show()
+        return dlg
 
 
 # ══════════════════════════════════════════════════════════════════
+#  Ajuste de stock
+# ══════════════════════════════════════════════════════════════════
 
-class VentanaAjusteStock(tk.Toplevel):
+class VentanaAjusteStock(QDialog):
     def __init__(self, parent, lote_id, al_guardar):
         super().__init__(parent)
-        self.title("Ajustar cantidad de lote")
-        self.resizable(False, False)
-        self.grab_set()
+        self.setWindowTitle("Ajustar cantidad de lote")
         self.lote_id = lote_id
         self.al_guardar = al_guardar
 
@@ -246,68 +235,82 @@ class VentanaAjusteStock(tk.Toplevel):
             texto_lote = f"{lote.numero_lote}  —  {lote.producto.nombre}"
             self.cantidad_actual = lote.cantidad_disponible
 
-        franja = tk.Frame(self, bg=COLOR_PRIMARIO, pady=12, padx=20)
-        franja.pack(fill="x")
-        tk.Label(franja, text="⚖  Ajustar cantidad de lote",
-                 bg=COLOR_PRIMARIO, fg="white",
-                 font=("Segoe UI", 13, "bold")).pack(anchor="w")
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
 
-        cuerpo = ttk.Frame(self, padding=(20, 16))
-        cuerpo.pack(fill="both", expand=True)
+        franja = QWidget()
+        fondo(franja, COLOR_PRIMARIO)
+        fl = QVBoxLayout(franja)
+        fl.setContentsMargins(20, 12, 20, 12)
+        lbl = QLabel("⚖  Ajustar cantidad de lote")
+        lbl.setStyleSheet("background: transparent; color: white;")
+        lbl.setFont(fuente(13, negrita=True))
+        fl.addWidget(lbl)
+        layout.addWidget(franja)
 
-        self._msg = MensajeEstado(cuerpo)
-        self._msg.pack(fill="x", pady=(0, 8))
+        cuerpo = QVBoxLayout()
+        cuerpo.setContentsMargins(20, 16, 20, 16)
+        layout.addLayout(cuerpo)
 
-        ttk.Label(cuerpo, text=texto_lote,
-                  font=("Segoe UI", 11, "bold")).pack(anchor="w")
-        ttk.Label(cuerpo,
-                  text=f"Cantidad disponible actual: {self.cantidad_actual:.2f}",
-                  foreground=COLOR_TEXTO_SECUNDARIO).pack(anchor="w", pady=(2, 12))
+        self._msg = MensajeEstado()
+        cuerpo.addWidget(self._msg)
 
-        sec = SeccionFormulario(cuerpo, "Datos del ajuste")
-        sec.pack(fill="x", pady=(0, 12))
+        lbl_lote = QLabel(texto_lote)
+        lbl_lote.setFont(fuente(11, negrita=True))
+        cuerpo.addWidget(lbl_lote)
+        lbl_actual = QLabel(f"Cantidad disponible actual: {self.cantidad_actual:.2f}")
+        lbl_actual.setStyleSheet(f"color: {COLOR_TEXTO_SECUNDARIO};")
+        cuerpo.addWidget(lbl_actual)
+        cuerpo.addSpacing(8)
 
-        ttk.Label(sec, text="Nueva cantidad disponible *",
-                  font=("Segoe UI", 9, "bold")).pack(anchor="w")
-        self.var_nueva_cantidad = tk.StringVar(value=str(self.cantidad_actual))
-        ttk.Entry(sec, textvariable=self.var_nueva_cantidad, width=20).pack(
-            anchor="w", pady=(2, 8))
+        sec = SeccionFormulario("Datos del ajuste")
+        secl = QVBoxLayout(sec)
+        cuerpo.addWidget(sec)
 
-        ttk.Label(sec, text="Motivo del ajuste *",
-                  font=("Segoe UI", 9, "bold")).pack(anchor="w")
-        self.var_motivo = tk.StringVar()
-        ttk.Entry(sec, textvariable=self.var_motivo, width=40).pack(
-            anchor="w", pady=(2, 0))
+        lbl_cant = QLabel("Nueva cantidad disponible *")
+        lbl_cant.setFont(fuente(9, negrita=True))
+        secl.addWidget(lbl_cant)
+        self.entrada_cantidad = QLineEdit(str(self.cantidad_actual))
+        secl.addWidget(self.entrada_cantidad)
+        secl.addSpacing(6)
 
-        ttk.Label(cuerpo, text="* Campos obligatorios",
-                  style="CampoAuto.TLabel").pack(anchor="w", pady=(4, 8))
+        lbl_motivo = QLabel("Motivo del ajuste *")
+        lbl_motivo.setFont(fuente(9, negrita=True))
+        secl.addWidget(lbl_motivo)
+        self.entrada_motivo = QLineEdit()
+        secl.addWidget(self.entrada_motivo)
 
-        fila_btn = ttk.Frame(cuerpo)
-        fila_btn.pack(fill="x")
-        ttk.Button(fila_btn, text="Cancelar", style="Secundario.TButton",
-                   command=self.destroy).pack(side="right", padx=(8, 0))
-        ttk.Button(fila_btn, text="💾  Guardar ajuste",
-                   command=self._guardar).pack(side="right")
+        cuerpo.addStretch()
+        fila_btn = QHBoxLayout()
+        fila_btn.addStretch()
+        btn_cancelar = QPushButton("Cancelar")
+        poner_clase(btn_cancelar, "secundario")
+        btn_cancelar.clicked.connect(self.reject)
+        fila_btn.addWidget(btn_cancelar)
+        btn_guardar = QPushButton("💾  Guardar ajuste")
+        btn_guardar.clicked.connect(self._guardar)
+        fila_btn.addWidget(btn_guardar)
+        cuerpo.addLayout(fila_btn)
 
-        self.bind("<Escape>", lambda e: self.destroy())
-        centrar_ventana(self, 420, 360)
+        centrar_ventana(self, 440, 380)
 
     def _guardar(self):
         try:
-            nueva_cantidad = float(self.var_nueva_cantidad.get())
+            nueva_cantidad = float(self.entrada_cantidad.text())
             if nueva_cantidad < 0:
                 raise ValueError
         except ValueError:
             self._msg.mostrar("La cantidad debe ser un número mayor o igual a 0.", "error")
             return
-        if not self.var_motivo.get().strip():
+        if not self.entrada_motivo.text().strip():
             self._msg.mostrar("El motivo del ajuste es obligatorio.", "error")
             return
 
         with nueva_sesion() as db:
             try:
                 ajustar_stock(db, self.lote_id, nueva_cantidad,
-                               motivo=self.var_motivo.get().strip(),
+                               motivo=self.entrada_motivo.text().strip(),
                                usuario_id=sesion_actual.usuario_id)
                 db.commit()
             except Exception as error:
@@ -315,107 +318,121 @@ class VentanaAjusteStock(tk.Toplevel):
                 return
 
         self.al_guardar()
-        self.destroy()
+        self.accept()
+
+    def keyPressEvent(self, evento):
+        if evento.key() == Qt.Key_Escape:
+            self.reject()
+        else:
+            super().keyPressEvent(evento)
 
 
-class VentanaProducto(tk.Toplevel):
+class VentanaProducto(QDialog):
     def __init__(self, parent, al_guardar):
         super().__init__(parent)
-        self.title("Nuevo producto en el catálogo")
-        self.resizable(False, False)
-        self.grab_set()
+        self.setWindowTitle("Nuevo producto en el catálogo")
         self.al_guardar = al_guardar
 
-        franja = tk.Frame(self, bg=COLOR_PRIMARIO, pady=12, padx=20)
-        franja.pack(fill="x")
-        tk.Label(franja, text="＋  Registrar nuevo producto",
-                 bg=COLOR_PRIMARIO, fg="white",
-                 font=("Segoe UI", 13, "bold")).pack(anchor="w")
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
 
-        cuerpo = ttk.Frame(self, padding=(20, 16))
-        cuerpo.pack(fill="both", expand=True)
+        franja = QWidget()
+        fondo(franja, COLOR_PRIMARIO)
+        fl = QVBoxLayout(franja)
+        fl.setContentsMargins(20, 12, 20, 12)
+        lbl = QLabel("＋  Registrar nuevo producto")
+        lbl.setStyleSheet("background: transparent; color: white;")
+        lbl.setFont(fuente(13, negrita=True))
+        fl.addWidget(lbl)
+        layout.addWidget(franja)
 
-        self._msg = MensajeEstado(cuerpo)
-        self._msg.pack(fill="x", pady=(0, 8))
+        cuerpo = QVBoxLayout()
+        cuerpo.setContentsMargins(20, 16, 20, 16)
+        layout.addLayout(cuerpo)
 
-        sec = SeccionFormulario(cuerpo, "Información del producto")
-        sec.pack(fill="x", pady=(0, 8))
-        sec.columnconfigure(1, weight=1)
+        self._msg = MensajeEstado()
+        cuerpo.addWidget(self._msg)
 
-        self.var_codigo       = tk.StringVar()
-        self.var_nombre       = tk.StringVar()
-        self.var_tipo         = tk.StringVar(value="Insumo")
-        self.var_unidad       = tk.StringVar()
-        self.var_precio       = tk.StringVar(value="0")
-        self.var_stock_minimo = tk.StringVar(value="0")
+        sec = SeccionFormulario("Información del producto")
+        secl = QGridLayout(sec)
+        secl.setColumnStretch(1, 1)
+        cuerpo.addWidget(sec)
 
-        campos = [
-            ("Código único *", self.var_codigo, None, "Ej: INS-014"),
-            ("Nombre del producto *", self.var_nombre, None, ""),
-            ("Tipo de producto", self.var_tipo, ["Insumo", "Producto terminado"], ""),
-            ("Unidad de medida", self.var_unidad, None, "kg, L, g, unidad..."),
-            ("Precio de venta (S/)", self.var_precio, None, "Solo para producto terminado"),
-            ("Stock mínimo", self.var_stock_minimo, None, "Cantidad mínima para alerta"),
+        self.entrada_codigo = QLineEdit()
+        self.entrada_codigo.setPlaceholderText("Ej: INS-014")
+        self.entrada_nombre = QLineEdit()
+        self.combo_tipo = QComboBox()
+        self.combo_tipo.addItems(["Insumo", "Producto terminado"])
+        self.entrada_unidad = QLineEdit()
+        self.entrada_unidad.setPlaceholderText("kg, L, g, unidad...")
+        self.entrada_precio = QLineEdit("0")
+        self.entrada_stock_minimo = QLineEdit("0")
+
+        filas = [
+            ("Código único *", self.entrada_codigo, True),
+            ("Nombre del producto *", self.entrada_nombre, True),
+            ("Tipo de producto", self.combo_tipo, False),
+            ("Unidad de medida", self.entrada_unidad, False),
+            ("Precio de venta (S/)", self.entrada_precio, False),
+            ("Stock mínimo", self.entrada_stock_minimo, False),
         ]
+        for i, (etiqueta, widget, obligatorio) in enumerate(filas):
+            lbl_campo = QLabel(etiqueta)
+            lbl_campo.setFont(fuente(9, negrita=obligatorio))
+            secl.addWidget(lbl_campo, i, 0)
+            secl.addWidget(widget, i, 1)
 
-        for i, (etiqueta, var, opciones, hint) in enumerate(campos):
-            negrita = "*" in etiqueta
-            ttk.Label(sec, text=etiqueta,
-                      font=("Segoe UI", 9, "bold") if negrita else ("Segoe UI", 9)
-                      ).grid(row=i, column=0, sticky="w", padx=(0, 12), pady=3)
-            if opciones:
-                ttk.Combobox(sec, textvariable=var, state="readonly",
-                              values=opciones, width=30
-                              ).grid(row=i, column=1, sticky="ew", pady=3)
-            else:
-                f = ttk.Frame(sec)
-                f.grid(row=i, column=1, sticky="ew", pady=3)
-                f.columnconfigure(0, weight=1)
-                ttk.Entry(f, textvariable=var, width=32).grid(row=0, column=0, sticky="w")
-                if hint:
-                    ttk.Label(f, text=hint,
-                              style="CampoAuto.TLabel").grid(row=1, column=0, sticky="w")
+        lbl_nota = QLabel("* Campo obligatorio")
+        lbl_nota.setStyleSheet(f"color: {COLOR_TEXTO_SECUNDARIO};")
+        lbl_nota.setFont(fuente(8, cursiva=True))
+        cuerpo.addWidget(lbl_nota)
+        cuerpo.addStretch()
 
-        ttk.Label(cuerpo, text="* Campo obligatorio",
-                  style="CampoAuto.TLabel").pack(anchor="w", pady=(4, 8))
+        fila_btn = QHBoxLayout()
+        fila_btn.addStretch()
+        btn_cancelar = QPushButton("Cancelar")
+        poner_clase(btn_cancelar, "secundario")
+        btn_cancelar.clicked.connect(self.reject)
+        fila_btn.addWidget(btn_cancelar)
+        btn_guardar = QPushButton("💾  Registrar producto")
+        btn_guardar.clicked.connect(self._guardar)
+        fila_btn.addWidget(btn_guardar)
+        cuerpo.addLayout(fila_btn)
 
-        fila_btn = ttk.Frame(cuerpo)
-        fila_btn.pack(fill="x")
-        ttk.Button(fila_btn, text="Cancelar", style="Secundario.TButton",
-                   command=self.destroy).pack(side="right", padx=(8, 0))
-        ttk.Button(fila_btn, text="💾  Registrar producto",
-                   command=self._guardar).pack(side="right")
-
-        self.bind("<Escape>", lambda e: self.destroy())
-        centrar_ventana(self, 460, 400)
+        centrar_ventana(self, 480, 420)
 
     def _guardar(self):
-        if not self.var_codigo.get().strip() or not self.var_nombre.get().strip():
+        codigo = self.entrada_codigo.text().strip()
+        nombre = self.entrada_nombre.text().strip()
+        if not codigo or not nombre:
             self._msg.mostrar("El código y el nombre son obligatorios.", "error")
             return
         try:
-            precio = float(self.var_precio.get() or 0)
-            stock_minimo = float(self.var_stock_minimo.get() or 0)
+            precio = float(self.entrada_precio.text() or 0)
+            stock_minimo = float(self.entrada_stock_minimo.text() or 0)
         except ValueError:
             self._msg.mostrar("El precio y el stock mínimo deben ser números válidos.", "error")
             return
 
         with nueva_sesion() as db:
-            if db.query(Producto).filter_by(codigo=self.var_codigo.get().strip()).first():
+            if db.query(Producto).filter_by(codigo=codigo).first():
                 self._msg.mostrar(
                     "Ya existe un producto con ese código en el catálogo. "
                     "Usa un código diferente.", "error", 0)
                 return
             db.add(Producto(
-                codigo=self.var_codigo.get().strip(),
-                nombre=self.var_nombre.get().strip(),
-                tipo=self.var_tipo.get(),
-                unidad_medida=self.var_unidad.get().strip(),
-                precio_venta=precio,
-                stock_minimo=stock_minimo,
-                activo=True,
+                codigo=codigo, nombre=nombre, tipo=self.combo_tipo.currentText(),
+                unidad_medida=self.entrada_unidad.text().strip(),
+                precio_venta=precio, stock_minimo=stock_minimo, activo=True,
             ))
             db.commit()
 
         self.al_guardar()
-        self.destroy()
+        self.accept()
+
+    def keyPressEvent(self, evento):
+        if evento.key() == Qt.Key_Escape:
+            self.reject()
+        else:
+            super().keyPressEvent(evento)

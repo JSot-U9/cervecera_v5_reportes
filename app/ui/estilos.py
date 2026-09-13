@@ -1,266 +1,259 @@
 """
-estilos.py
-==========
-Sistema visual centralizado del ERP Cervecería.
-Paleta "cervecera artesanal" con jerarquía visual mejorada.
+estilos.py (PySide6)
+=====================
+Sistema visual centralizado del ERP Cervecería — versión Qt.
+
+Misma paleta "cervecera artesanal" que la versión Tkinter (se
+mantienen los mismos nombres de color para que el resto del código
+no tenga que cambiar), pero aplicada con una hoja de estilos QSS
+global en vez de ttk.Style.
+
+¿Cómo se emulan los "estilos con nombre" de ttk (p. ej.
+`style="Secundario.TButton"`) en Qt? Con la propiedad dinámica
+`clase`: se le pone `widget.setProperty("clase", "secundario")` a un
+QPushButton/QLabel y el selector QSS `[clase="secundario"]` lo
+recoge. La función `poner_clase()` de más abajo hace ese trabajo.
 """
 
-import ttkbootstrap as tb
-
-TEMA_TTKBOOTSTRAP = "flatly"
+from PySide6.QtWidgets import QWidget
+from PySide6.QtGui import QFont
 
 # ══════════════════════════════════════════════════════════════════
-#  PALETA DE COLORES
-#  (versión "alto contraste": tonos más saturados para reforzar la
-#  jerarquía visual y facilitar identificar botones, estados y
-#  secciones de un vistazo)
+#  PALETA DE COLORES (idéntica a la versión Tkinter)
 # ══════════════════════════════════════════════════════════════════
-COLOR_FONDO          = "#FDF6E3"   # crema — fondo general
-COLOR_TARJETA        = "#FFFFFF"   # blanco — tarjetas, tablas
+COLOR_FONDO           = "#FDF6E3"   # crema — fondo general
+COLOR_TARJETA         = "#FFFFFF"   # blanco — tarjetas, tablas
 
-COLOR_PRIMARIO       = "#C1600C"   # Ámbar intenso — botones primarios, encabezados
-COLOR_PRIMARIO_OSCURO = "#8F4400"  # Ámbar oscuro — hover
-COLOR_PRIMARIO_CLARO  = "#F2A649"  # Ámbar claro — fondos suaves, acentos
+COLOR_PRIMARIO        = "#C1600C"   # Ámbar intenso — botones primarios, encabezados
+COLOR_PRIMARIO_OSCURO = "#8F4400"   # Ámbar oscuro — hover
+COLOR_PRIMARIO_CLARO  = "#F2A649"   # Ámbar claro — fondos suaves, acentos
 
-COLOR_SIDEBAR        = "#16240D"   # Verde bosque intenso — menú lateral
-COLOR_SIDEBAR_TEXTO  = "#E9E2C6"   # crema — texto sobre sidebar
-COLOR_SIDEBAR_ACTIVO = "#4C7A29"   # verde vivo — hover/activo sidebar
-COLOR_SIDEBAR_SELECCIONADO = "#3A6019"  # verde vivo más oscuro — estado activo persistente
+COLOR_SIDEBAR         = "#16240D"   # Verde bosque intenso — menú lateral
+COLOR_SIDEBAR_TEXTO   = "#E9E2C6"   # crema — texto sobre sidebar
+COLOR_SIDEBAR_ACTIVO  = "#4C7A29"   # verde vivo — hover/activo sidebar
+COLOR_SIDEBAR_SELECCIONADO = "#3A6019"  # verde vivo más oscuro — activo persistente
 
-COLOR_TEXTO          = "#1B2A12"   # verde muy oscuro — texto principal
-COLOR_TEXTO_SECUNDARIO = "#5C6650" # verde grisáceo — texto secundario
+COLOR_TEXTO           = "#1B2A12"   # verde muy oscuro — texto principal
+COLOR_TEXTO_SECUNDARIO = "#5C6650"  # verde grisáceo — texto secundario
 
-COLOR_EXITO          = "#1E8A3C"   # verde intenso — éxito, stock OK
-COLOR_ALERTA         = "#D62B1F"   # rojo intenso — errores, peligro
-COLOR_ADVERTENCIA    = "#E8A100"   # dorado intenso — advertencias
+COLOR_EXITO           = "#1E8A3C"
+COLOR_ALERTA          = "#D62B1F"
+COLOR_ADVERTENCIA     = "#E8A100"
 
 # Derivados internos
 _COLOR_SECUNDARIO        = "#F0D9A8"
 _COLOR_SECUNDARIO_HOVER  = "#E6C27D"
 _COLOR_DISABLED          = "#E6DAC0"
 _COLOR_SEPARADOR         = "#E5D6B3"
-_COLOR_FILA_PAR          = "#FFFDF5"   # filas alternas tabla
-_COLOR_FILA_IMPAR        = "#FFFFFF"
+_COLOR_FILA_PAR          = "#FFFDF5"
 _COLOR_ENCABEZADO_HOVER  = "#A64E0A"
 
+FUENTE_BASE = "Segoe UI"
 
-def aplicar_estilos(ventana):
+
+def poner_clase(widget: QWidget, clase: str):
+    """Equivalente a `style='Xxx.TButton'` en ttk: marca `widget` con
+    una propiedad dinámica que la hoja QSS usa para diferenciarlo."""
+    widget.setProperty("clase", clase)
+    widget.style().unpolish(widget)
+    widget.style().polish(widget)
+    widget.update()
+
+
+_contador_fondo = 0
+
+
+def estilo_escopado(widget: QWidget, css_body: str):
+    """Aplica un bloque QSS a `widget` escopado por su objectName (ver
+    `fondo()` para la explicación completa de por qué hace falta)."""
+    global _contador_fondo
+    _contador_fondo += 1
+    nombre = f"w{_contador_fondo}"
+    widget.setObjectName(nombre)
+    widget.setStyleSheet(f"QWidget#{nombre} {{ {css_body} }}")
+
+
+def fondo(widget: QWidget, color: str, extra: str = ""):
+    """Asigna un color de fondo a `widget` de forma 'escopada' (con un
+    selector por objectName), en vez de `widget.setStyleSheet(f"background-color: ...")`.
+
+    ¿Por qué hace falta esto? Es un bug/comportamiento conocido de Qt:
+    un stylesheet SIN selector aplicado a un contenedor (p. ej.
+    `frame.setStyleSheet("background-color: green;")`) puede bloquear
+    que la hoja de estilos GLOBAL de la app siga aplicándose a los
+    widgets hijos (botones, labels) — se ven "apagados" o sin color,
+    como si perdieran su estilo. Al escoparlo con `#nombre_unico`, la
+    regla solo afecta a ESE widget puntual y el resto del árbol sigue
+    recibiendo el QSS global con normalidad.
     """
-    Configura todos los estilos ttk. Llamar una vez por ventana raíz.
+    estilo_escopado(widget, f"background-color: {color}; {extra}")
+
+
+def fuente(tamano=10, negrita=False, cursiva=False) -> QFont:
+    f = QFont(FUENTE_BASE, tamano)
+    f.setBold(negrita)
+    f.setItalic(cursiva)
+    return f
+
+
+# ══════════════════════════════════════════════════════════════════
+#  HOJA DE ESTILOS GLOBAL (QSS)
+# ══════════════════════════════════════════════════════════════════
+
+def hoja_estilos() -> str:
+    return f"""
+    QWidget {{
+        background-color: {COLOR_FONDO};
+        color: {COLOR_TEXTO};
+        font-family: "{FUENTE_BASE}";
+        font-size: 10pt;
+    }}
+    QMainWindow, QDialog {{
+        background-color: {COLOR_FONDO};
+    }}
+    QLabel {{
+        background: transparent;
+    }}
+
+    /* ── Botón primario (por defecto) ─────────────────────────── */
+    QPushButton {{
+        background-color: {COLOR_PRIMARIO};
+        color: white;
+        border: none;
+        border-radius: 5px;
+        padding: 9px 16px;
+        font-weight: bold;
+    }}
+    QPushButton:hover {{ background-color: {COLOR_PRIMARIO_OSCURO}; }}
+    QPushButton:pressed {{ background-color: {COLOR_PRIMARIO_OSCURO}; }}
+    QPushButton:disabled {{ background-color: {_COLOR_DISABLED}; color: #A0927A; }}
+
+    QPushButton[clase="secundario"] {{
+        background-color: {_COLOR_SECUNDARIO};
+        color: {COLOR_TEXTO};
+        font-weight: normal;
+    }}
+    QPushButton[clase="secundario"]:hover {{ background-color: {_COLOR_SECUNDARIO_HOVER}; }}
+
+    QPushButton[clase="peligro"] {{ background-color: {COLOR_ALERTA}; color: white; }}
+    QPushButton[clase="peligro"]:hover {{ background-color: #A61F16; }}
+
+    QPushButton[clase="exito"] {{ background-color: {COLOR_EXITO}; color: white; }}
+    QPushButton[clase="exito"]:hover {{ background-color: #166B2E; }}
+
+    QPushButton[clase="accion"] {{
+        background-color: {COLOR_PRIMARIO}; color: white;
+        padding: 6px 12px; font-size: 9pt; font-weight: bold;
+    }}
+    QPushButton[clase="accion"]:hover {{ background-color: {COLOR_PRIMARIO_OSCURO}; }}
+
+    QPushButton[clase="accionSecundaria"] {{
+        background-color: {_COLOR_SECUNDARIO}; color: {COLOR_TEXTO};
+        padding: 6px 12px; font-size: 9pt; font-weight: normal;
+    }}
+    QPushButton[clase="accionSecundaria"]:hover {{ background-color: {_COLOR_SECUNDARIO_HOVER}; }}
+
+    QPushButton[clase="sidebar"] {{
+        background-color: {COLOR_SIDEBAR};
+        color: {COLOR_SIDEBAR_TEXTO};
+        text-align: left;
+        padding: 11px 16px;
+        border-radius: 0px;
+        font-weight: normal;
+    }}
+    QPushButton[clase="sidebar"]:hover {{ background-color: {COLOR_SIDEBAR_ACTIVO}; color: white; }}
+
+    QPushButton[clase="sidebarActivo"] {{
+        background-color: {COLOR_SIDEBAR_SELECCIONADO};
+        color: white;
+        text-align: left;
+        padding: 11px 16px;
+        border-radius: 0px;
+        font-weight: bold;
+    }}
+    QPushButton[clase="sidebarActivo"]:hover {{ background-color: {COLOR_SIDEBAR_ACTIVO}; }}
+
+    /* ── Campos de entrada ─────────────────────────────────────── */
+    QLineEdit, QComboBox, QDateEdit, QSpinBox, QDoubleSpinBox {{
+        background-color: white;
+        color: {COLOR_TEXTO};
+        border: 1px solid {_COLOR_SEPARADOR};
+        border-radius: 4px;
+        padding: 6px 8px;
+    }}
+    QLineEdit:focus, QComboBox:focus {{ border: 1px solid {COLOR_PRIMARIO}; }}
+    QComboBox::drop-down {{ border: none; width: 22px; }}
+    QComboBox QAbstractItemView {{
+        background-color: white; color: {COLOR_TEXTO};
+        selection-background-color: {COLOR_PRIMARIO_CLARO};
+        selection-color: {COLOR_TEXTO};
+    }}
+
+    /* ── Pestañas (QTabWidget = Notebook) ──────────────────────── */
+    QTabWidget::pane {{ border: none; background: {COLOR_FONDO}; }}
+    QTabBar::tab {{
+        background: {COLOR_PRIMARIO_CLARO};
+        color: {COLOR_TEXTO};
+        padding: 9px 18px;
+        margin-right: 2px;
+        font-size: 9pt;
+    }}
+    QTabBar::tab:selected {{
+        background: {COLOR_PRIMARIO};
+        color: white;
+        font-weight: bold;
+    }}
+
+    /* ── Tablas ─────────────────────────────────────────────────── */
+    QTableWidget {{
+        background-color: white;
+        alternate-background-color: {_COLOR_FILA_PAR};
+        gridline-color: {_COLOR_SEPARADOR};
+        border: 1px solid {_COLOR_SEPARADOR};
+        font-size: 9pt;
+    }}
+    QTableWidget::item {{ padding: 6px; }}
+    QTableWidget::item:selected {{
+        background-color: {COLOR_PRIMARIO_CLARO}; color: {COLOR_TEXTO};
+    }}
+    QHeaderView::section {{
+        background-color: {COLOR_PRIMARIO};
+        color: white;
+        padding: 8px;
+        border: none;
+        font-weight: bold;
+        font-size: 9pt;
+    }}
+
+    /* ── GroupBox (SeccionFormulario) ──────────────────────────── */
+    QGroupBox {{
+        border: 1px solid {_COLOR_SEPARADOR};
+        border-radius: 6px;
+        margin-top: 14px;
+        padding: 12px 10px 10px 10px;
+        font-weight: bold;
+        color: {COLOR_PRIMARIO};
+    }}
+    QGroupBox::title {{
+        subcontrol-origin: margin;
+        left: 10px;
+        padding: 0 6px;
+        color: {COLOR_PRIMARIO};
+    }}
+
+    QScrollBar:vertical {{ background: {COLOR_FONDO}; width: 12px; }}
+    QScrollBar::handle:vertical {{ background: {_COLOR_SECUNDARIO}; border-radius: 5px; min-height: 24px; }}
+    QScrollBar:horizontal {{ background: {COLOR_FONDO}; height: 12px; }}
+    QScrollBar::handle:horizontal {{ background: {_COLOR_SECUNDARIO}; border-radius: 5px; min-width: 24px; }}
+
+    QToolTip {{
+        background-color: {COLOR_SIDEBAR}; color: {COLOR_SIDEBAR_TEXTO};
+        border: 1px solid {COLOR_PRIMARIO}; padding: 4px;
+    }}
     """
-    ventana.configure(bg=COLOR_FONDO)
-
-    tb.Style.instance = None
-    estilo = tb.Style(theme=TEMA_TTKBOOTSTRAP)
-
-    # ── Widgets genéricos ──────────────────────────────────────────
-    estilo.configure("TFrame", background=COLOR_FONDO)
-    estilo.configure("TLabel", background=COLOR_FONDO, foreground=COLOR_TEXTO,
-                     font=("Segoe UI", 10))
-    estilo.configure("TLabelframe", background=COLOR_FONDO, foreground=COLOR_TEXTO,
-                     font=("Segoe UI", 10, "bold"))
-    estilo.configure("TLabelframe.Label", background=COLOR_FONDO, foreground=COLOR_TEXTO,
-                     font=("Segoe UI", 10, "bold"))
-
-    # ── Botón primario ─────────────────────────────────────────────
-    estilo.configure("TButton",
-                     background=COLOR_PRIMARIO, foreground="white",
-                     padding=(14, 8), borderwidth=0,
-                     font=("Segoe UI", 10, "bold"), relief="flat")
-    estilo.map("TButton",
-               background=[("active", COLOR_PRIMARIO_OSCURO),
-                            ("disabled", _COLOR_DISABLED)],
-               foreground=[("disabled", "#A0927A")])
-
-    # ── Botón de peligro ───────────────────────────────────────────
-    estilo.configure("Peligro.TButton",
-                     background=COLOR_ALERTA, foreground="white",
-                     padding=(14, 8), borderwidth=0,
-                     font=("Segoe UI", 10, "bold"))
-    estilo.map("Peligro.TButton",
-               background=[("active", "#A61F16")])
-
-    # ── Botón secundario ───────────────────────────────────────────
-    estilo.configure("Secundario.TButton",
-                     background=_COLOR_SECUNDARIO, foreground=COLOR_TEXTO,
-                     padding=(14, 8), borderwidth=0,
-                     font=("Segoe UI", 10))
-    estilo.map("Secundario.TButton",
-               background=[("active", _COLOR_SECUNDARIO_HOVER)])
-
-    # ── Botón de éxito ─────────────────────────────────────────────
-    estilo.configure("Exito.TButton",
-                     background=COLOR_EXITO, foreground="white",
-                     padding=(14, 8), borderwidth=0,
-                     font=("Segoe UI", 10, "bold"))
-    estilo.map("Exito.TButton",
-               background=[("active", "#166B2E")])
-
-    # ── Botón acción pequeña (dentro de tablas, barras) ────────────
-    estilo.configure("Accion.TButton",
-                     background=COLOR_PRIMARIO, foreground="white",
-                     padding=(10, 6), borderwidth=0,
-                     font=("Segoe UI", 9, "bold"))
-    estilo.map("Accion.TButton",
-               background=[("active", COLOR_PRIMARIO_OSCURO)])
-
-    estilo.configure("AccionSecundaria.TButton",
-                     background=_COLOR_SECUNDARIO, foreground=COLOR_TEXTO,
-                     padding=(10, 6), borderwidth=0,
-                     font=("Segoe UI", 9))
-    estilo.map("AccionSecundaria.TButton",
-               background=[("active", _COLOR_SECUNDARIO_HOVER)])
-
-    # ── Campos de entrada ──────────────────────────────────────────
-    estilo.configure("TEntry",
-                     fieldbackground="white", foreground=COLOR_TEXTO,
-                     padding=(6, 5), font=("Segoe UI", 10))
-    estilo.configure("TCombobox",
-                     fieldbackground="white", foreground=COLOR_TEXTO,
-                     padding=(4, 4), font=("Segoe UI", 10))
-
-    # ── Encabezado de módulo ───────────────────────────────────────
-    estilo.configure("Encabezado.TFrame", background=COLOR_PRIMARIO)
-    estilo.configure("Encabezado.TLabel", background=COLOR_PRIMARIO)
-    estilo.configure("EncabezadoTitulo.TLabel",
-                     background=COLOR_PRIMARIO, foreground="white",
-                     font=("Segoe UI", 15, "bold"))
-    estilo.configure("EncabezadoSubtitulo.TLabel",
-                     background=COLOR_PRIMARIO, foreground=COLOR_PRIMARIO_CLARO,
-                     font=("Segoe UI", 9))
-
-    # ── Menú lateral ───────────────────────────────────────────────
-    estilo.configure("Sidebar.TFrame", background=COLOR_SIDEBAR)
-    estilo.configure("Sidebar.TLabel",
-                     background=COLOR_SIDEBAR, foreground=COLOR_SIDEBAR_TEXTO,
-                     font=("Segoe UI", 10))
-    estilo.configure("SidebarTitulo.TLabel",
-                     background=COLOR_SIDEBAR, foreground="white",
-                     font=("Segoe UI", 11, "bold"))
-    estilo.configure("SidebarRol.TLabel",
-                     background=COLOR_SIDEBAR, foreground=COLOR_PRIMARIO_CLARO,
-                     font=("Segoe UI", 8, "bold"))
-    estilo.configure("Sidebar.TButton",
-                     background=COLOR_SIDEBAR, foreground=COLOR_SIDEBAR_TEXTO,
-                     borderwidth=0, anchor="w",
-                     padding=(14, 10), font=("Segoe UI", 10))
-    estilo.map("Sidebar.TButton",
-               background=[("active", COLOR_SIDEBAR_ACTIVO)],
-               foreground=[("active", "white")])
-    estilo.configure("SidebarActivo.TButton",
-                     background=COLOR_SIDEBAR_SELECCIONADO, foreground="white",
-                     borderwidth=0, anchor="w",
-                     padding=(14, 10), font=("Segoe UI", 10, "bold"))
-    estilo.map("SidebarActivo.TButton",
-               background=[("active", COLOR_SIDEBAR_ACTIVO)],
-               foreground=[("active", "white")])
-    estilo.configure("Sidebar.TSeparator", background=COLOR_SIDEBAR_ACTIVO)
-
-    # ── Tarjetas KPI ───────────────────────────────────────────────
-    estilo.configure("Tarjeta.TFrame",
-                     background=COLOR_TARJETA, relief="flat")
-    estilo.configure("Tarjeta.TLabel",
-                     background=COLOR_TARJETA, foreground=COLOR_TEXTO)
-    estilo.configure("TarjetaValor.TLabel",
-                     background=COLOR_TARJETA, foreground=COLOR_PRIMARIO,
-                     font=("Segoe UI", 22, "bold"))
-    estilo.configure("TarjetaValorAlerta.TLabel",
-                     background=COLOR_TARJETA, foreground=COLOR_ALERTA,
-                     font=("Segoe UI", 22, "bold"))
-    estilo.configure("TarjetaValorExito.TLabel",
-                     background=COLOR_TARJETA, foreground=COLOR_EXITO,
-                     font=("Segoe UI", 22, "bold"))
-    estilo.configure("TarjetaValorAdvertencia.TLabel",
-                     background=COLOR_TARJETA, foreground=COLOR_ADVERTENCIA,
-                     font=("Segoe UI", 22, "bold"))
-    estilo.configure("TarjetaEtiqueta.TLabel",
-                     background=COLOR_TARJETA, foreground=COLOR_TEXTO_SECUNDARIO,
-                     font=("Segoe UI", 9))
-    estilo.configure("TarjetaIcono.TLabel",
-                     background=COLOR_TARJETA, foreground=COLOR_TEXTO_SECUNDARIO,
-                     font=("Segoe UI", 11))
-
-    # ── Pestañas ───────────────────────────────────────────────────
-    estilo.configure("TNotebook",
-                     background=COLOR_FONDO, borderwidth=0)
-    estilo.configure("TNotebook.Tab",
-                     background=COLOR_PRIMARIO_CLARO, foreground=COLOR_TEXTO,
-                     padding=(16, 8), font=("Segoe UI", 9))
-    estilo.map("TNotebook.Tab",
-               background=[("selected", COLOR_PRIMARIO), ("!selected", COLOR_PRIMARIO_CLARO)],
-               foreground=[("selected", "white")],
-               padding=[("selected", (16, 12)), ("!selected", (16, 8))],
-               font=[("selected", ("Segoe UI", 9, "bold"))])
-
-    # ── Tablas ─────────────────────────────────────────────────────
-    estilo.configure("Treeview",
-                     background="white", fieldbackground="white",
-                     foreground=COLOR_TEXTO, rowheight=30, borderwidth=0,
-                     font=("Segoe UI", 9))
-    estilo.configure("Treeview.Heading",
-                     background=COLOR_PRIMARIO, foreground="white",
-                     font=("Segoe UI", 9, "bold"), padding=(8, 8))
-    estilo.map("Treeview.Heading",
-               background=[("active", _COLOR_ENCABEZADO_HOVER)])
-    estilo.map("Treeview",
-               background=[("selected", COLOR_PRIMARIO_CLARO)],
-               foreground=[("selected", COLOR_TEXTO)])
-
-    # ── Barra de estado inferior ───────────────────────────────────
-    estilo.configure("BarraEstado.TFrame",
-                     background=COLOR_SIDEBAR)
-    estilo.configure("BarraEstado.TLabel",
-                     background=COLOR_SIDEBAR, foreground="#B9C7A9",
-                     font=("Segoe UI", 8))
-    estilo.configure("BarraEstadoOK.TLabel",
-                     background=COLOR_SIDEBAR, foreground="#5FDD73",
-                     font=("Segoe UI", 8))
-
-    # ── Sección de formulario ──────────────────────────────────────
-    estilo.configure("SeccionFormulario.TLabelframe",
-                     background=COLOR_FONDO, foreground=COLOR_PRIMARIO,
-                     font=("Segoe UI", 9, "bold"), relief="groove", borderwidth=1)
-    estilo.configure("SeccionFormulario.TLabelframe.Label",
-                     background=COLOR_FONDO, foreground=COLOR_PRIMARIO,
-                     font=("Segoe UI", 9, "bold"))
-
-    # ── Etiqueta de campo automático ──────────────────────────────
-    estilo.configure("CampoAuto.TLabel",
-                     background=COLOR_FONDO, foreground=COLOR_TEXTO_SECUNDARIO,
-                     font=("Segoe UI", 8, "italic"))
-
-    # ── Etiqueta para mensajes de error inline ─────────────────────
-    estilo.configure("ErrorInline.TLabel",
-                     background=COLOR_FONDO, foreground=COLOR_ALERTA,
-                     font=("Segoe UI", 8))
-
-    # ── Alertas y mensajes ────────────────────────────────────────
-    estilo.configure("AlertaFrame.TFrame",
-                     background="#FFF3CD")
-    estilo.configure("AlertaLabel.TLabel",
-                     background="#FFF3CD", foreground="#856404",
-                     font=("Segoe UI", 9))
-    estilo.configure("ExitoFrame.TFrame",
-                     background="#D4EDDA")
-    estilo.configure("ExitoLabel.TLabel",
-                     background="#D4EDDA", foreground="#155724",
-                     font=("Segoe UI", 9))
-
-    _habilitar_seleccionar_todo(ventana)
-    _habilitar_atajos_globales(ventana)
 
 
-def _habilitar_seleccionar_todo(ventana):
-    def seleccionar_todo(evento):
-        widget = evento.widget
-        widget.select_range(0, "end")
-        widget.icursor("end")
-        return "break"
-    for clase in ("Entry", "TEntry", "TCombobox"):
-        ventana.bind_class(clase, "<Control-a>", seleccionar_todo)
-        ventana.bind_class(clase, "<Control-A>", seleccionar_todo)
-
-
-def _habilitar_atajos_globales(ventana):
-    """Atajos de teclado globales: F5 recarga la vista activa."""
-    pass  # Los módulos registran sus propios atajos en refrescar()
+def aplicar_estilos(app):
+    """Aplica la hoja de estilos global. Llamar una vez sobre la QApplication."""
+    app.setStyleSheet(hoja_estilos())
+    app.setFont(fuente(10))

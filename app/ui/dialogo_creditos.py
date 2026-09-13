@@ -1,83 +1,63 @@
-"""
-dialogo_creditos.py
-====================
-Ventana emergente "Acerca de / Créditos" del sistema.
+"""dialogo_creditos.py (PySide6)"""
 
-Muestra el logo de la empresa y los datos de autoría del proyecto
-(autor, institución, lugar y año). Se puede abrir tanto desde la
-pantalla de inicio de sesión como desde el menú lateral de la
-ventana principal.
-"""
+from PySide6.QtCore import Qt
+from PySide6.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QFrame
 
-import tkinter as tk
-from tkinter import ttk
-
-from app.ui.estilos import (
-    COLOR_PRIMARIO, COLOR_TEXTO, COLOR_TEXTO_SECUNDARIO, COLOR_FONDO,
-)
+from app.ui.estilos import COLOR_PRIMARIO, COLOR_TEXTO, COLOR_TEXTO_SECUNDARIO, fuente, fondo
 from app.ui.widgets import centrar_ventana
-from app.ui.logo import cargar_logo
-
-# ══════════════════════════════════════════════════════════════════
-#  DATOS DE CRÉDITOS DEL PROYECTO
-# ══════════════════════════════════════════════════════════════════
-AUTOR = "Kevin Daniel Zuñiga Chacon"
-INSTITUCION = "Universidad Andina del Cusco"
-LUGAR = "Cusco - Perú"
-ANIO = "2026"
 
 
-class DialogoCreditos(tk.Toplevel):
-    """Diálogo modal de "Acerca de" con los créditos del sistema."""
-
+class DialogoCreditos(QDialog):
     def __init__(self, parent):
         super().__init__(parent)
-        self.title("Créditos")
-        self.resizable(False, False)
-        self.configure(bg=COLOR_FONDO)
-        self.transient(parent)
-        self.grab_set()
+        self.setWindowTitle("Créditos")
 
-        # Franja superior de color con el logo
-        franja = tk.Frame(self, bg=COLOR_PRIMARIO, pady=18, padx=20)
-        franja.pack(fill="x")
-        self._imagen_logo = cargar_logo(self, tamano="chico")
-        tk.Label(franja, image=self._imagen_logo, bg=COLOR_PRIMARIO).pack()
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
 
-        # Cuerpo con los datos de créditos
-        cuerpo = ttk.Frame(self, padding=(28, 20))
-        cuerpo.pack(fill="both", expand=True)
+        franja = QFrame()
+        fondo(franja, COLOR_PRIMARIO)
+        flayout = QVBoxLayout(franja)
+        flayout.setContentsMargins(24, 20, 24, 20)
+        lbl = QLabel("🍺  Cervecera v5")
+        lbl.setStyleSheet("background: transparent; color: white;")
+        lbl.setFont(fuente(16, negrita=True))
+        flayout.addWidget(lbl)
+        layout.addWidget(franja)
 
-        ttk.Label(
-            cuerpo, text="Créditos", font=("Segoe UI", 14, "bold"),
-            foreground=COLOR_TEXTO,
-        ).pack(anchor="center", pady=(0, 14))
+        cuerpo = QVBoxLayout()
+        cuerpo.setContentsMargins(24, 18, 24, 18)
+        cuerpo.setSpacing(6)
+        for texto in (
+            "Sistema de gestión para cervecerías artesanales",
+            "Compras · Inventario (FIFO) · Producción · Ventas · Costos",
+            "",
+            "Desarrollado con Python, SQLAlchemy y PySide6.",
+        ):
+            lbl2 = QLabel(texto)
+            lbl2.setFont(fuente(9))
+            lbl2.setStyleSheet(f"color: {COLOR_TEXTO_SECUNDARIO};")
+            lbl2.setWordWrap(True)
+            cuerpo.addWidget(lbl2)
+        layout.addLayout(cuerpo)
 
-        self._fila(cuerpo, "Autor", AUTOR)
-        self._fila(cuerpo, "Institución", INSTITUCION)
-        self._fila(cuerpo, "Lugar", LUGAR)
-        self._fila(cuerpo, "Año", ANIO)
+        barra = QHBoxLayout()
+        barra.setContentsMargins(24, 0, 24, 18)
+        barra.addStretch()
+        btn = QPushButton("Cerrar")
+        btn.clicked.connect(self.accept)
+        barra.addWidget(btn)
+        layout.addLayout(barra)
 
-        ttk.Button(
-            cuerpo, text="Cerrar", command=self.destroy,
-        ).pack(fill="x", pady=(18, 0))
+        centrar_ventana(self, 420, 260)
 
-        centrar_ventana(self, 380, 450)
-        self.bind("<Escape>", lambda e: self.destroy())
-
-    def _fila(self, parent, etiqueta: str, valor: str):
-        fila = ttk.Frame(parent)
-        fila.pack(fill="x", pady=(0, 8))
-        ttk.Label(
-            fila, text=f"{etiqueta}:", font=("Segoe UI", 10, "bold"),
-            foreground=COLOR_TEXTO_SECUNDARIO,
-        ).pack(anchor="w")
-        ttk.Label(
-            fila, text=valor, font=("Segoe UI", 11),
-            foreground=COLOR_TEXTO, wraplength=320, justify="left",
-        ).pack(anchor="w")
+    def keyPressEvent(self, evento):
+        if evento.key() == Qt.Key_Escape:
+            self.accept()
+        else:
+            super().keyPressEvent(evento)
 
 
 def mostrar_creditos(parent):
-    """Abre el diálogo de créditos como ventana modal."""
-    DialogoCreditos(parent)
+    DialogoCreditos(parent).exec()

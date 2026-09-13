@@ -1,19 +1,18 @@
-"""
-vista_compras.py
-=================
-Módulo de Compras — mejoras UX:
-- Encabezados simplificados
-- Mensajes de éxito/error descriptivos
-- Validación inline en formularios
-- Estados visuales en tablas
+"""vista_compras.py (PySide6)
+==============================
+Órdenes de compra a proveedores + gestión de proveedores.
 """
 
-import tkinter as tk
-from tkinter import ttk, messagebox
 from datetime import datetime
 
+from PySide6.QtCore import Qt
+from PySide6.QtWidgets import (
+    QWidget, QDialog, QVBoxLayout, QHBoxLayout, QGridLayout, QLabel,
+    QLineEdit, QComboBox, QPushButton, QTabWidget, QMessageBox,
+)
+
 from app.basedatos import nueva_sesion
-from app.modelos import Producto, LoteInventario
+from app.modelos import Producto, LoteInventario, Proveedor
 from app.sesion import sesion_actual
 from app.seguridad import puede
 from app.logica_compras import (
@@ -21,75 +20,83 @@ from app.logica_compras import (
     crear_proveedor, actualizar_proveedor,
 )
 from app.ui.widgets import (
-    EncabezadoModulo, BarraBusqueda, TablaDatos, ajustar_ventana_a_contenido,
-    centrar_ventana, SeccionFormulario, MensajeEstado
+    EncabezadoModulo, BarraBusqueda, TablaDatos, SeccionFormulario, MensajeEstado,
+    centrar_ventana, confirmar,
 )
-from app.ui.estilos import COLOR_TEXTO_SECUNDARIO, COLOR_PRIMARIO, COLOR_ALERTA
+from app.ui.estilos import COLOR_TEXTO_SECUNDARIO, COLOR_PRIMARIO, fuente, poner_clase
 
 
-class VistaCompras(ttk.Frame):
-    def __init__(self, parent):
+class VistaCompras(QWidget):
+    def __init__(self, parent=None):
         super().__init__(parent)
-        EncabezadoModulo(
-            self,
-            "Compras",
-            "Órdenes de compra a proveedores · El inventario se actualiza automáticamente",
+        # Referencias a los últimos diálogos abiertos: las usará el
+        # sistema de tutorial (fase posterior de la migración) para
+        # resaltar los campos reales sin duplicar este formulario.
+        self.ultimo_dialogo_nueva_orden = None
+        self.ultimo_dialogo_reporte = None
+        self.tutorial_targets = {}
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+
+        layout.addWidget(EncabezadoModulo(
+            "Compras", "Órdenes de compra a proveedores · El inventario se actualiza automáticamente",
             icono="🛒",
-        ).pack(fill="x")
+        ))
 
-        notebook = ttk.Notebook(self)
-        notebook.pack(fill="both", expand=True, padx=12, pady=8)
+        self.notebook = QTabWidget()
+        layout.addWidget(self.notebook, stretch=1)
 
-        self._pestana_ordenes(notebook)
-        self._pestana_proveedores(notebook)
+        self._pestana_ordenes()
+        self._pestana_proveedores()
 
         self.refrescar()
 
-    def _pestana_ordenes(self, notebook):
-        pestana = ttk.Frame(notebook, padding=8)
-        notebook.add(pestana, text="  🧾  Órdenes de Compra  ")
+    def _pestana_ordenes(self):
+        pestana = QWidget()
+        pl = QVBoxLayout(pestana)
+        pl.setContentsMargins(10, 10, 10, 10)
+        self.notebook.addTab(pestana, "🧾  Órdenes de Compra")
 
         puede_crear = puede(sesion_actual.rol, "compras", "crear")
-        barra = BarraBusqueda(pestana, al_escribir=lambda t: self.tabla_ordenes.filtrar(t),
+        barra = BarraBusqueda(al_escribir=lambda t: self.tabla_ordenes.filtrar(t),
                                placeholder="🔎  Buscar orden, proveedor...")
         if puede_crear:
-            barra.agregar_boton("＋  Nueva orden", self._abrir_nueva_orden)
-        barra.agregar_boton("📊  Reporte", self._abrir_dialogo_reporte,
-                             estilo="AccionSecundaria.TButton")
-        barra.pack(fill="x", pady=(0, 8))
+            self.tutorial_targets["btn_nueva_orden"] = barra.agregar_boton(
+                "＋  Nueva orden", self._abrir_nueva_orden)
+        self.tutorial_targets["btn_reporte"] = barra.agregar_boton(
+            "📊  Reporte", self._abrir_dialogo_reporte, estilo="accionSecundaria")
+        pl.addWidget(barra)
 
-        contenedor_tabla = ttk.Frame(pestana)
-        contenedor_tabla.pack(fill="both", expand=True)
         self.tabla_ordenes = TablaDatos(
-            contenedor_tabla,
             ["N° Orden", "Proveedor", "Fecha", "Doc. Referencia", "Total (S/)"],
             anchos={"N° Orden": 100, "Proveedor": 200, "Fecha": 110,
                     "Doc. Referencia": 140, "Total (S/)": 110},
         )
-        self.tabla_ordenes.empaquetar()
+        pl.addWidget(self.tabla_ordenes, stretch=1)
+        self.tutorial_targets["tabla_ordenes"] = self.tabla_ordenes
 
-    def _pestana_proveedores(self, notebook):
-        pestana = ttk.Frame(notebook, padding=8)
-        notebook.add(pestana, text="  🏭  Proveedores  ")
+    def _pestana_proveedores(self):
+        pestana = QWidget()
+        pl = QVBoxLayout(pestana)
+        pl.setContentsMargins(10, 10, 10, 10)
+        self.notebook.addTab(pestana, "🏭  Proveedores")
 
         puede_crear = puede(sesion_actual.rol, "compras", "crear")
-        barra = BarraBusqueda(pestana, al_escribir=lambda t: self.tabla_proveedores.filtrar(t),
+        barra = BarraBusqueda(al_escribir=lambda t: self.tabla_proveedores.filtrar(t),
                                placeholder="🔎  Buscar proveedor...")
         if puede_crear:
             barra.agregar_boton("＋  Nuevo proveedor", self._abrir_nuevo_proveedor)
-            barra.agregar_boton("✏  Editar", self._abrir_editar_proveedor,
-                                 estilo="AccionSecundaria.TButton")
-        barra.pack(fill="x", pady=(0, 8))
+            barra.agregar_boton("✏  Editar", self._abrir_editar_proveedor, estilo="accionSecundaria")
+        pl.addWidget(barra)
 
-        contenedor_tabla = ttk.Frame(pestana)
-        contenedor_tabla.pack(fill="both", expand=True)
         self.tabla_proveedores = TablaDatos(
-            contenedor_tabla,
             ["Razón Social", "RUC", "Contacto", "Teléfono", "Correo"],
             anchos={"Razón Social": 200, "RUC": 110, "Contacto": 150,
                     "Teléfono": 120, "Correo": 180},
         )
-        self.tabla_proveedores.empaquetar()
+        pl.addWidget(self.tabla_proveedores, stretch=1)
 
     def refrescar(self):
         with nueva_sesion() as db:
@@ -107,64 +114,83 @@ class VistaCompras(ttk.Frame):
         self.tabla_proveedores.cargar_filas(filas_proveedores)
 
     def _abrir_nueva_orden(self):
-        VentanaNuevaOrden(self, al_guardar=self.refrescar)
+        self.ultimo_dialogo_nueva_orden = VentanaNuevaOrden(self.window(), al_guardar=self.refrescar)
+        self.ultimo_dialogo_nueva_orden.show()
+        return self.ultimo_dialogo_nueva_orden
+
+    def abrir_nueva_orden_para_tutorial(self):
+        if not puede(sesion_actual.rol, "compras", "crear"):
+            return None
+        return self._abrir_nueva_orden()
+
+    def abrir_reporte_para_tutorial(self):
+        self._abrir_dialogo_reporte()
+        return self.ultimo_dialogo_reporte
 
     def _abrir_nuevo_proveedor(self):
-        VentanaProveedor(self, al_guardar=self.refrescar)
+        dlg = VentanaProveedor(self.window(), al_guardar=self.refrescar)
+        dlg.exec()
 
     def _abrir_editar_proveedor(self):
         proveedor_id = self.tabla_proveedores.id_seleccionado()
         if not proveedor_id:
-            messagebox.showwarning("Aviso", "Selecciona un proveedor de la lista primero.")
+            QMessageBox.warning(self, "Aviso", "Selecciona un proveedor de la lista primero.")
             return
         with nueva_sesion() as db:
-            from app.modelos import Proveedor
             p = db.get(Proveedor, proveedor_id)
             datos = {"razon_social": p.razon_social, "ruc": p.ruc or "",
                      "contacto": p.contacto or "", "telefono": p.telefono or "",
                      "email": p.email or ""}
-        VentanaProveedor(self, al_guardar=self.refrescar,
-                          proveedor_id=proveedor_id, datos=datos)
+        dlg = VentanaProveedor(self.window(), al_guardar=self.refrescar,
+                                proveedor_id=proveedor_id, datos=datos)
+        dlg.exec()
 
     def _abrir_dialogo_reporte(self):
         from app.ui.dialogo_reporte import DialogoReporte
-        DialogoReporte(self.winfo_toplevel(), modulo="compras")
+        self.ultimo_dialogo_reporte = DialogoReporte(self.window(), modulo="compras")
+        self.ultimo_dialogo_reporte.show()
+        return self.ultimo_dialogo_reporte
 
 
 # ══════════════════════════════════════════════════════════════════
 #  Formulario Proveedor
 # ══════════════════════════════════════════════════════════════════
 
-class VentanaProveedor(tk.Toplevel):
-    """Crear o editar un proveedor con validación mejorada."""
-
+class VentanaProveedor(QDialog):
     def __init__(self, parent, al_guardar, proveedor_id=None, datos=None):
         super().__init__(parent)
-        self.title("Editar proveedor" if proveedor_id else "Nuevo proveedor")
-        self.resizable(False, False)
-        self.grab_set()
+        self.setWindowTitle("Editar proveedor" if proveedor_id else "Nuevo proveedor")
         self.al_guardar = al_guardar
         self.proveedor_id = proveedor_id
         datos = datos or {}
 
-        # Encabezado
-        franja = tk.Frame(self, bg=COLOR_PRIMARIO, pady=12, padx=20)
-        franja.pack(fill="x")
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+
+        from app.ui.estilos import fondo
+        franja = QWidget()
+        fondo(franja, COLOR_PRIMARIO)
+        fl = QVBoxLayout(franja)
+        fl.setContentsMargins(20, 12, 20, 12)
         icono = "✏" if proveedor_id else "＋"
-        tk.Label(franja, text=f"{icono}  {'Editar proveedor' if proveedor_id else 'Nuevo proveedor'}",
-                 bg=COLOR_PRIMARIO, fg="white",
-                 font=("Segoe UI", 13, "bold")).pack(anchor="w")
+        lbl = QLabel(f"{icono}  {'Editar proveedor' if proveedor_id else 'Nuevo proveedor'}")
+        lbl.setStyleSheet("background: transparent; color: white;")
+        lbl.setFont(fuente(13, negrita=True))
+        fl.addWidget(lbl)
+        layout.addWidget(franja)
 
-        cuerpo = ttk.Frame(self, padding=(20, 16))
-        cuerpo.pack(fill="both", expand=True)
+        cuerpo = QVBoxLayout()
+        cuerpo.setContentsMargins(20, 16, 20, 16)
+        layout.addLayout(cuerpo)
 
-        self._msg = MensajeEstado(cuerpo)
-        self._msg.pack(fill="x", pady=(0, 8))
+        self._msg = MensajeEstado()
+        cuerpo.addWidget(self._msg)
 
-        # Sección info
-        sec = SeccionFormulario(cuerpo, "Información del proveedor")
-        sec.pack(fill="x", pady=(0, 12))
-        sec.columnconfigure(1, weight=1)
+        sec = SeccionFormulario("Información del proveedor")
+        secl = QGridLayout(sec)
+        secl.setColumnStretch(1, 1)
+        cuerpo.addWidget(sec)
 
         campos = [
             ("Razón social *", "razon_social", True),
@@ -173,41 +199,45 @@ class VentanaProveedor(tk.Toplevel):
             ("Teléfono", "telefono", False),
             ("Correo electrónico", "email", False),
         ]
-        self._vars = {}
+        self._entradas = {}
         for i, (etiqueta, clave, obligatorio) in enumerate(campos):
-            ttk.Label(sec, text=etiqueta,
-                      font=("Segoe UI", 9, "bold") if obligatorio else ("Segoe UI", 9)
-                      ).grid(row=i, column=0, sticky="w", padx=(0, 12), pady=4)
-            var = tk.StringVar(value=datos.get(clave, ""))
-            ttk.Entry(sec, textvariable=var, width=35).grid(row=i, column=1, sticky="ew", pady=4)
-            self._vars[clave] = var
+            lbl_campo = QLabel(etiqueta)
+            lbl_campo.setFont(fuente(9, negrita=obligatorio))
+            secl.addWidget(lbl_campo, i, 0)
+            entrada = QLineEdit(datos.get(clave, ""))
+            secl.addWidget(entrada, i, 1)
+            self._entradas[clave] = entrada
 
-        # Nota campos obligatorios
-        ttk.Label(cuerpo, text="* Campo obligatorio",
-                  style="CampoAuto.TLabel").pack(anchor="w", pady=(0, 12))
+        lbl_nota = QLabel("* Campo obligatorio")
+        lbl_nota.setStyleSheet(f"color: {COLOR_TEXTO_SECUNDARIO};")
+        lbl_nota.setFont(fuente(8, cursiva=True))
+        cuerpo.addWidget(lbl_nota)
+        cuerpo.addStretch()
 
-        # Botones
-        fila_btn = ttk.Frame(cuerpo)
-        fila_btn.pack(fill="x")
-        ttk.Button(fila_btn, text="Cancelar", style="Secundario.TButton",
-                   command=self.destroy).pack(side="right", padx=(8, 0))
-        ttk.Button(fila_btn, text="💾  Guardar proveedor",
-                   command=self._guardar).pack(side="right")
+        fila_btn = QHBoxLayout()
+        fila_btn.addStretch()
+        btn_cancelar = QPushButton("Cancelar")
+        poner_clase(btn_cancelar, "secundario")
+        btn_cancelar.clicked.connect(self.reject)
+        fila_btn.addWidget(btn_cancelar)
+        btn_guardar = QPushButton("💾  Guardar proveedor")
+        btn_guardar.clicked.connect(self._guardar)
+        fila_btn.addWidget(btn_guardar)
+        cuerpo.addLayout(fila_btn)
 
-        self.bind("<Escape>", lambda e: self.destroy())
-        centrar_ventana(self, 430, 340)
+        centrar_ventana(self, 460, 380)
 
     def _guardar(self):
-        razon = self._vars["razon_social"].get().strip()
+        razon = self._entradas["razon_social"].text().strip()
         if not razon:
             self._msg.mostrar("La razón social es obligatoria.", "error")
             return
         datos = dict(
             razon_social=razon,
-            ruc=self._vars["ruc"].get().strip() or None,
-            contacto=self._vars["contacto"].get().strip(),
-            telefono=self._vars["telefono"].get().strip(),
-            email=self._vars["email"].get().strip(),
+            ruc=self._entradas["ruc"].text().strip() or None,
+            contacto=self._entradas["contacto"].text().strip(),
+            telefono=self._entradas["telefono"].text().strip(),
+            email=self._entradas["email"].text().strip(),
         )
         try:
             if self.proveedor_id:
@@ -218,21 +248,28 @@ class VentanaProveedor(tk.Toplevel):
             self._msg.mostrar(f"No se pudo guardar el proveedor: {error}", "error", 0)
             return
         self.al_guardar()
-        self.destroy()
+        self.accept()
+
+    def keyPressEvent(self, evento):
+        if evento.key() == Qt.Key_Escape:
+            self.reject()
+        else:
+            super().keyPressEvent(evento)
 
 
 # ══════════════════════════════════════════════════════════════════
 #  Formulario Nueva Orden de Compra
 # ══════════════════════════════════════════════════════════════════
 
-class VentanaNuevaOrden(tk.Toplevel):
-    """Formulario para armar y guardar una orden de compra con varios productos."""
+class VentanaNuevaOrden(QDialog):
+    """No modal (se usa .show(), no .exec()) para que el tutorial /
+    práctica guiada de una fase futura pueda seguir interactuando con
+    la ventana principal detrás mientras este formulario está abierto."""
 
     def __init__(self, parent, al_guardar):
         super().__init__(parent)
-        self.title("Nueva orden de compra")
-        self.resizable(True, True)
-        self.grab_set()
+        self.setWindowTitle("Nueva orden de compra")
+        self.setModal(False)
         self.al_guardar = al_guardar
         self.items_agregados = []
 
@@ -248,167 +285,187 @@ class VentanaNuevaOrden(tk.Toplevel):
                 if lote and lote.costo_unitario:
                     self._ultimos_precios[p.id] = lote.costo_unitario
 
-        # Encabezado
-        franja = tk.Frame(self, bg=COLOR_PRIMARIO, pady=12, padx=20)
-        franja.pack(fill="x")
-        tk.Label(franja, text="＋  Nueva orden de compra",
-                 bg=COLOR_PRIMARIO, fg="white",
-                 font=("Segoe UI", 13, "bold")).pack(anchor="w")
-        tk.Label(franja, text="Selecciona proveedor, agrega productos y guarda la orden",
-                 bg=COLOR_PRIMARIO, fg="#D4A369",
-                 font=("Segoe UI", 9)).pack(anchor="w")
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
 
-        cuerpo = ttk.Frame(self, padding=(20, 12))
-        cuerpo.pack(fill="both", expand=True)
+        from app.ui.estilos import fondo
+        franja = QWidget()
+        fondo(franja, COLOR_PRIMARIO)
+        fl = QVBoxLayout(franja)
+        fl.setContentsMargins(20, 12, 20, 12)
+        lbl1 = QLabel("＋  Nueva orden de compra")
+        lbl1.setStyleSheet("background: transparent; color: white;")
+        lbl1.setFont(fuente(13, negrita=True))
+        fl.addWidget(lbl1)
+        lbl2 = QLabel("Selecciona proveedor, agrega productos y guarda la orden")
+        lbl2.setStyleSheet("background: transparent; color: #F2D9B8;")
+        lbl2.setFont(fuente(9))
+        fl.addWidget(lbl2)
+        layout.addWidget(franja)
 
-        self._msg = MensajeEstado(cuerpo)
-        self._msg.pack(fill="x", pady=(0, 8))
+        cuerpo = QVBoxLayout()
+        cuerpo.setContentsMargins(20, 12, 20, 12)
+        layout.addLayout(cuerpo)
 
-        # ── Proveedor ──────────────────────────────────────────────
-        sec_prov = SeccionFormulario(cuerpo, "Proveedor")
-        sec_prov.pack(fill="x", pady=(0, 10))
-        ttk.Label(sec_prov, text="Proveedor *",
-                  font=("Segoe UI", 9, "bold")).pack(anchor="w")
-        self.combo_proveedor = ttk.Combobox(
-            sec_prov, state="readonly",
-            values=[f"{p.id} — {p.razon_social}" for p in self.proveedores],
-            width=50)
-        self.combo_proveedor.pack(fill="x", pady=(2, 0))
+        self._msg = MensajeEstado()
+        cuerpo.addWidget(self._msg)
 
-        # ── Agregar producto ───────────────────────────────────────
-        sec_prod = SeccionFormulario(cuerpo, "Agregar producto a la orden")
-        sec_prod.pack(fill="x", pady=(0, 10))
+        # ── Proveedor ──────────────────────────────────────────
+        sec_prov = SeccionFormulario("Proveedor")
+        spl = QVBoxLayout(sec_prov)
+        cuerpo.addWidget(sec_prov)
+        lbl_prov = QLabel("Proveedor *")
+        lbl_prov.setFont(fuente(9, negrita=True))
+        spl.addWidget(lbl_prov)
+        self.combo_proveedor = QComboBox()
+        for p in self.proveedores:
+            self.combo_proveedor.addItem(f"{p.id} — {p.razon_social}", p.id)
+        self.combo_proveedor.setCurrentIndex(-1)
+        spl.addWidget(self.combo_proveedor)
 
-        # Fila producto
-        f_prod = ttk.Frame(sec_prod)
-        f_prod.pack(fill="x", pady=(0, 6))
-        ttk.Label(f_prod, text="Producto *",
-                  font=("Segoe UI", 9, "bold")).pack(anchor="w")
-        self.combo_producto = ttk.Combobox(
-            f_prod, state="readonly", width=55,
-            values=[f"{p.id} — {p.nombre}" for p in self.productos])
-        self.combo_producto.pack(fill="x", pady=(2, 0))
-        self.combo_producto.bind("<<ComboboxSelected>>", self._autocompletar_precio)
+        # ── Agregar producto ────────────────────────────────────
+        sec_prod = SeccionFormulario("Agregar producto a la orden")
+        spr = QVBoxLayout(sec_prod)
+        cuerpo.addWidget(sec_prod)
 
-        # Fila cantidades
-        f_nums = ttk.Frame(sec_prod)
-        f_nums.pack(fill="x", pady=(0, 6))
+        lbl_prod = QLabel("Producto *")
+        lbl_prod.setFont(fuente(9, negrita=True))
+        spr.addWidget(lbl_prod)
+        self.combo_producto = QComboBox()
+        for p in self.productos:
+            self.combo_producto.addItem(f"{p.id} — {p.nombre}", p.id)
+        self.combo_producto.setCurrentIndex(-1)
+        self.combo_producto.currentIndexChanged.connect(self._autocompletar_precio)
+        spr.addWidget(self.combo_producto)
 
-        col_cant = ttk.Frame(f_nums)
-        col_cant.pack(side="left", padx=(0, 16))
-        ttk.Label(col_cant, text="Cantidad *",
-                  font=("Segoe UI", 9, "bold")).pack(anchor="w")
-        self.var_cantidad = tk.StringVar()
-        ttk.Entry(col_cant, textvariable=self.var_cantidad, width=12).pack(pady=(2, 0))
+        f_nums = QHBoxLayout()
+        spr.addLayout(f_nums)
 
-        col_precio = ttk.Frame(f_nums)
-        col_precio.pack(side="left", padx=(0, 16))
-        ttk.Label(col_precio, text="Precio unitario (S/)",
-                  font=("Segoe UI", 9, "bold")).pack(anchor="w")
-        self.var_precio = tk.StringVar()
-        ttk.Entry(col_precio, textvariable=self.var_precio, width=12).pack(pady=(2, 0))
-        self.lbl_precio_hint = ttk.Label(col_precio, text="",
-                                          foreground=COLOR_TEXTO_SECUNDARIO,
-                                          font=("Segoe UI", 8, "italic"))
-        self.lbl_precio_hint.pack(anchor="w")
+        col_cant = QVBoxLayout()
+        lbl_cant = QLabel("Cantidad *")
+        lbl_cant.setFont(fuente(9, negrita=True))
+        col_cant.addWidget(lbl_cant)
+        self.entry_cantidad = QLineEdit()
+        self.entry_cantidad.setFixedWidth(100)
+        col_cant.addWidget(self.entry_cantidad)
+        f_nums.addLayout(col_cant)
 
-        col_venc = ttk.Frame(f_nums)
-        col_venc.pack(side="left")
-        ttk.Label(col_venc, text="Vencimiento (AAAA-MM-DD)",
-                  font=("Segoe UI", 9)).pack(anchor="w")
-        self.var_fecha_vencimiento = tk.StringVar()
-        ttk.Entry(col_venc, textvariable=self.var_fecha_vencimiento, width=14).pack(pady=(2, 0))
-        ttk.Label(col_venc, text="Opcional",
-                  style="CampoAuto.TLabel").pack(anchor="w")
+        col_precio = QVBoxLayout()
+        lbl_precio = QLabel("Precio unitario (S/)")
+        lbl_precio.setFont(fuente(9, negrita=True))
+        col_precio.addWidget(lbl_precio)
+        self.entry_precio = QLineEdit()
+        self.entry_precio.setFixedWidth(100)
+        col_precio.addWidget(self.entry_precio)
+        self.lbl_precio_hint = QLabel("")
+        self.lbl_precio_hint.setStyleSheet(f"color: {COLOR_TEXTO_SECUNDARIO};")
+        self.lbl_precio_hint.setFont(fuente(8, cursiva=True))
+        col_precio.addWidget(self.lbl_precio_hint)
+        f_nums.addLayout(col_precio)
 
-        ttk.Button(sec_prod, text="＋  Agregar a la orden",
-                   command=self._agregar_item).pack(anchor="w", pady=(4, 0))
+        col_venc = QVBoxLayout()
+        lbl_venc = QLabel("Vencimiento (AAAA-MM-DD)")
+        lbl_venc.setFont(fuente(9))
+        col_venc.addWidget(lbl_venc)
+        self.entry_vencimiento = QLineEdit()
+        self.entry_vencimiento.setFixedWidth(120)
+        self.entry_vencimiento.setPlaceholderText("opcional")
+        col_venc.addWidget(self.entry_vencimiento)
+        f_nums.addLayout(col_venc)
+        f_nums.addStretch()
 
-        # ── Tabla de items ─────────────────────────────────────────
-        sec_tabla = SeccionFormulario(cuerpo, "Productos en esta orden")
-        sec_tabla.pack(fill="both", expand=True, pady=(0, 10))
+        self.btn_agregar_item = QPushButton("＋  Agregar a la orden")
+        self.btn_agregar_item.clicked.connect(self._agregar_item)
+        spr.addWidget(self.btn_agregar_item, alignment=Qt.AlignLeft)
 
-        self.lbl_total = ttk.Label(sec_tabla, text="Total: S/ 0.00",
-                                    font=("Segoe UI", 14, "bold"),
-                                    foreground=COLOR_PRIMARIO)
-        self.lbl_total.pack(anchor="e", pady=(0, 4))
+        # ── Tabla de items ────────────────────────────────────
+        sec_tabla = SeccionFormulario("Productos en esta orden")
+        stl = QVBoxLayout(sec_tabla)
+        cuerpo.addWidget(sec_tabla, stretch=1)
 
-        contenedor_tabla = ttk.Frame(sec_tabla)
-        contenedor_tabla.pack(fill="both", expand=True)
+        self.lbl_total = QLabel("Total: S/ 0.00")
+        self.lbl_total.setFont(fuente(14, negrita=True))
+        self.lbl_total.setStyleSheet(f"color: {COLOR_PRIMARIO};")
+        self.lbl_total.setAlignment(Qt.AlignRight)
+        stl.addWidget(self.lbl_total)
+
         self.tabla_items = TablaDatos(
-            contenedor_tabla,
             ["Producto", "Cantidad", "Precio Unit. (S/)", "Vence", "Subtotal (S/)"],
             con_id=False,
             anchos={"Producto": 180, "Cantidad": 80, "Precio Unit. (S/)": 120,
-                    "Vence": 110, "Subtotal (S/)": 110}
+                    "Vence": 110, "Subtotal (S/)": 110},
         )
-        self.tabla_items.empaquetar()
+        stl.addWidget(self.tabla_items, stretch=1)
 
-        # ── Botones finales ────────────────────────────────────────
-        fila_btn = ttk.Frame(cuerpo)
-        fila_btn.pack(fill="x")
-        ttk.Label(fila_btn, text="* Campos obligatorios",
-                  style="CampoAuto.TLabel").pack(side="left")
-        ttk.Button(fila_btn, text="Cancelar", style="Secundario.TButton",
-                   command=self.destroy).pack(side="right", padx=(8, 0))
-        ttk.Button(fila_btn, text="💾  Guardar orden de compra",
-                   command=self._guardar_orden).pack(side="right")
+        # ── Botones finales ───────────────────────────────────
+        fila_btn = QHBoxLayout()
+        lbl_oblig = QLabel("* Campos obligatorios")
+        lbl_oblig.setStyleSheet(f"color: {COLOR_TEXTO_SECUNDARIO};")
+        lbl_oblig.setFont(fuente(8, cursiva=True))
+        fila_btn.addWidget(lbl_oblig)
+        fila_btn.addStretch()
+        btn_cancelar = QPushButton("Cancelar")
+        poner_clase(btn_cancelar, "secundario")
+        btn_cancelar.clicked.connect(self.close)
+        fila_btn.addWidget(btn_cancelar)
+        self.btn_guardar = QPushButton("💾  Guardar orden de compra")
+        self.btn_guardar.clicked.connect(self._guardar_orden)
+        fila_btn.addWidget(self.btn_guardar)
+        cuerpo.addLayout(fila_btn)
 
-        self.bind("<Escape>", lambda e: self.destroy())
-        centrar_ventana(self, 760, 620)
+        centrar_ventana(self, 780, 640)
 
-    def _autocompletar_precio(self, evento=None):
-        if not self.combo_producto.get():
+    def _autocompletar_precio(self):
+        producto_id = self.combo_producto.currentData()
+        if producto_id is None:
             return
-        producto_id = int(self.combo_producto.get().split(" — ")[0])
         ultimo = self._ultimos_precios.get(producto_id)
         if ultimo:
-            self.var_precio.set(f"{ultimo:.2f}")
-            self.lbl_precio_hint.config(text="↑ último precio registrado")
+            self.entry_precio.setText(f"{ultimo:.2f}")
+            self.lbl_precio_hint.setText("↑ último precio registrado")
         else:
-            self.var_precio.set("")
-            self.lbl_precio_hint.config(text="(sin compra previa)")
+            self.entry_precio.setText("")
+            self.lbl_precio_hint.setText("(sin compra previa)")
 
     def _agregar_item(self):
-        if not self.combo_producto.get():
+        producto_id = self.combo_producto.currentData()
+        if producto_id is None:
             self._msg.mostrar("Selecciona un producto antes de agregar.", "advertencia")
             return
         try:
-            cantidad = float(self.var_cantidad.get())
-            precio = float(self.var_precio.get())
+            cantidad = float(self.entry_cantidad.text())
+            precio = float(self.entry_precio.text())
             if cantidad <= 0:
                 raise ValueError("cantidad negativa")
             if precio < 0:
                 raise ValueError("precio negativo")
         except ValueError:
             self._msg.mostrar(
-                "La cantidad debe ser mayor que 0 y el precio debe ser un número válido.",
-                "error")
+                "La cantidad debe ser mayor que 0 y el precio debe ser un número válido.", "error")
             return
 
-        texto_fecha = self.var_fecha_vencimiento.get().strip()
+        texto_fecha = self.entry_vencimiento.text().strip()
         fecha_vencimiento = None
         if texto_fecha:
             try:
                 fecha_vencimiento = datetime.strptime(texto_fecha, "%Y-%m-%d").date()
             except ValueError:
                 self._msg.mostrar(
-                    "Formato de fecha incorrecto. Usa AAAA-MM-DD (ej: 2027-06-30).",
-                    "error")
+                    "Formato de fecha incorrecto. Usa AAAA-MM-DD (ej: 2027-06-30).", "error")
                 return
 
-        producto_id = int(self.combo_producto.get().split(" — ")[0])
         self.items_agregados.append({
             "producto_id": producto_id, "cantidad": cantidad,
             "precio_unitario": precio, "fecha_vencimiento": fecha_vencimiento,
         })
         self._msg.mostrar("Producto agregado a la orden.", "exito", 2000)
         self._refrescar_tabla_items()
-        self.var_cantidad.set("")
-        self.var_precio.set("")
-        self.var_fecha_vencimiento.set("")
-        self.lbl_precio_hint.config(text="")
-        self.combo_producto.set("")
+        self.entry_cantidad.clear()
+        self.entry_precio.clear()
+        self.entry_vencimiento.clear()
+        self.lbl_precio_hint.setText("")
+        self.combo_producto.setCurrentIndex(-1)
 
     def _refrescar_tabla_items(self):
         filas = []
@@ -419,24 +476,22 @@ class VentanaNuevaOrden(tk.Toplevel):
                 subtotal = item["cantidad"] * item["precio_unitario"]
                 total += subtotal
                 filas.append([
-                    producto.nombre,
-                    item["cantidad"],
-                    f"S/ {item['precio_unitario']:.2f}",
+                    producto.nombre, item["cantidad"], f"S/ {item['precio_unitario']:.2f}",
                     str(item["fecha_vencimiento"]) if item["fecha_vencimiento"] else "—",
                     f"S/ {subtotal:.2f}",
                 ])
         self.tabla_items.cargar_filas(filas)
-        self.lbl_total.config(text=f"Total: S/ {total:,.2f}")
+        self.lbl_total.setText(f"Total: S/ {total:,.2f}")
 
     def _guardar_orden(self):
-        if not self.combo_proveedor.get():
+        proveedor_id = self.combo_proveedor.currentData()
+        if proveedor_id is None:
             self._msg.mostrar("Selecciona un proveedor para la orden.", "error")
             return
         if not self.items_agregados:
             self._msg.mostrar("Agrega al menos un producto a la orden antes de guardar.", "error")
             return
 
-        proveedor_id = int(self.combo_proveedor.get().split(" — ")[0])
         try:
             orden = registrar_compra(
                 proveedor_id=proveedor_id,
@@ -444,19 +499,23 @@ class VentanaNuevaOrden(tk.Toplevel):
                 usuario_id=sesion_actual.usuario_id,
             )
         except Exception as error:
-            messagebox.showerror(
-                "No se pudo registrar la orden",
+            QMessageBox.critical(
+                self, "No se pudo registrar la orden",
                 f"Ocurrió un error al guardar la orden de compra.\n\n"
-                f"Detalle: {error}\n\n"
-                f"Verifica los datos e inténtalo nuevamente.")
+                f"Detalle: {error}\n\nVerifica los datos e inténtalo nuevamente.")
             return
 
-        messagebox.showinfo(
-            "✓ Orden registrada correctamente",
+        QMessageBox.information(
+            self, "✓ Orden registrada correctamente",
             f"La orden {orden.numero} fue guardada.\n"
-            f"Proveedor: {self.combo_proveedor.get().split(' — ')[1]}\n"
+            f"Proveedor: {self.combo_proveedor.currentText().split(' — ')[1]}\n"
             f"Productos: {len(self.items_agregados)}\n"
-            f"El stock del inventario fue actualizado."
-        )
+            f"El stock del inventario fue actualizado.")
         self.al_guardar()
-        self.destroy()
+        self.close()
+
+    def keyPressEvent(self, evento):
+        if evento.key() == Qt.Key_Escape:
+            self.close()
+        else:
+            super().keyPressEvent(evento)
