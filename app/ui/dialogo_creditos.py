@@ -1,56 +1,98 @@
-"""dialogo_creditos.py (PySide6)"""
+"""dialogo_creditos.py (PySide6)
+==================================
+Ventana emergente "Acerca de / Créditos" del sistema.
+
+Muestra los datos de autoría del proyecto (autor, institución, lugar y año).
+Se puede abrir tanto desde la pantalla de inicio de sesión como desde el 
+menú lateral de la ventana principal.
+"""
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QFrame
+from PySide6.QtWidgets import (
+    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QFrame,
+)
 
-from app.ui.estilos import COLOR_PRIMARIO, COLOR_TEXTO, COLOR_TEXTO_SECUNDARIO, fuente, fondo
+from app.ui.estilos import (
+    COLOR_PRIMARIO, COLOR_TEXTO, COLOR_TEXTO_SECUNDARIO, fuente, fondo,
+)
 from app.ui.widgets import centrar_ventana
+from app.ui.logo import cargar_logo
+
+# ══════════════════════════════════════════════════════════════════
+#  DATOS DE CRÉDITOS DEL PROYECTO
+# ══════════════════════════════════════════════════════════════════
+AUTOR = "Kevin Daniel Zuñiga Chacon"
+INSTITUCION = "Universidad Andina del Cusco"
+LUGAR = "Cusco - Perú"
+ANIO = "2026"
 
 
 class DialogoCreditos(QDialog):
+    """Diálogo modal de "Acerca de" con los créditos del sistema."""
+
     def __init__(self, parent):
         super().__init__(parent)
         self.setWindowTitle("Créditos")
+        self.setModal(True)
+        self.setStyleSheet("background: transparent;")
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
+        # Franja superior con logo
         franja = QFrame()
         fondo(franja, COLOR_PRIMARIO)
         flayout = QVBoxLayout(franja)
-        flayout.setContentsMargins(24, 20, 24, 20)
-        lbl = QLabel("🍺  Cervecera v5")
-        lbl.setStyleSheet("background: transparent; color: white;")
-        lbl.setFont(fuente(16, negrita=True))
-        flayout.addWidget(lbl)
+        flayout.setContentsMargins(24, 18, 24, 18)
+        flayout.setSpacing(0)
+        
+        lbl_logo = QLabel()
+        lbl_logo.setPixmap(cargar_logo("chico"))
+        lbl_logo.setAlignment(Qt.AlignCenter)
+        flayout.addWidget(lbl_logo)
         layout.addWidget(franja)
 
+        # Cuerpo con datos de créditos
         cuerpo = QVBoxLayout()
-        cuerpo.setContentsMargins(24, 18, 24, 18)
-        cuerpo.setSpacing(6)
-        for texto in (
-            "Sistema de gestión para cervecerías artesanales",
-            "Compras · Inventario (FIFO) · Producción · Ventas · Costos",
-            "",
-            "Desarrollado con Python, SQLAlchemy y PySide6.",
-        ):
-            lbl2 = QLabel(texto)
-            lbl2.setFont(fuente(9))
-            lbl2.setStyleSheet(f"color: {COLOR_TEXTO_SECUNDARIO};")
-            lbl2.setWordWrap(True)
-            cuerpo.addWidget(lbl2)
+        cuerpo.setContentsMargins(28, 20, 28, 20)
+        cuerpo.setSpacing(0)
+
+        lbl_titulo = QLabel("Créditos")
+        lbl_titulo.setFont(fuente(14, negrita=True))
+        lbl_titulo.setStyleSheet(f"color: {COLOR_TEXTO};")
+        lbl_titulo.setAlignment(Qt.AlignCenter)
+        cuerpo.addWidget(lbl_titulo)
+        cuerpo.addSpacing(14)
+
+        self._agregar_fila(cuerpo, "Autor", AUTOR)
+        self._agregar_fila(cuerpo, "Institución", INSTITUCION)
+        self._agregar_fila(cuerpo, "Lugar", LUGAR)
+        self._agregar_fila(cuerpo, "Año", ANIO)
+
+        cuerpo.addSpacing(18)
+
+        btn_cerrar = QPushButton("Cerrar")
+        btn_cerrar.setFont(fuente(10))
+        btn_cerrar.clicked.connect(self.accept)
+        cuerpo.addWidget(btn_cerrar)
+
         layout.addLayout(cuerpo)
+        centrar_ventana(self, 380, 340)
 
-        barra = QHBoxLayout()
-        barra.setContentsMargins(24, 0, 24, 18)
-        barra.addStretch()
-        btn = QPushButton("Cerrar")
-        btn.clicked.connect(self.accept)
-        barra.addWidget(btn)
-        layout.addLayout(barra)
+    def _agregar_fila(self, layout_padre, etiqueta: str, valor: str):
+        """Agrega una fila con etiqueta y valor."""
+        lbl_etiqueta = QLabel(f"{etiqueta}:")
+        lbl_etiqueta.setFont(fuente(10, negrita=True))
+        lbl_etiqueta.setStyleSheet(f"color: {COLOR_TEXTO_SECUNDARIO};")
+        layout_padre.addWidget(lbl_etiqueta)
 
-        centrar_ventana(self, 420, 260)
+        lbl_valor = QLabel(valor)
+        lbl_valor.setFont(fuente(11))
+        lbl_valor.setStyleSheet(f"color: {COLOR_TEXTO};")
+        lbl_valor.setWordWrap(True)
+        layout_padre.addWidget(lbl_valor)
+        layout_padre.addSpacing(8)
 
     def keyPressEvent(self, evento):
         if evento.key() == Qt.Key_Escape:
@@ -60,4 +102,5 @@ class DialogoCreditos(QDialog):
 
 
 def mostrar_creditos(parent):
+    """Abre el diálogo de créditos como ventana modal."""
     DialogoCreditos(parent).exec()
