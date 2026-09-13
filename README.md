@@ -1,4 +1,4 @@
-# ERP Cervecería del Valle Sagrado — v5 (con módulo de reportes)
+# ERP Cervecería del Valle Sagrado — v6 (con módulo de tutorial)
 
 Sistema de gestión (ERP) de escritorio para la Cervecería del Valle
 Sagrado (Cusco), escrito en **Python + PySide6 + SQLAlchemy**.
