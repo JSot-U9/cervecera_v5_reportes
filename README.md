@@ -1,7 +1,7 @@
 # ERP Cervecería del Valle Sagrado — v5 (con módulo de reportes)
 
 Sistema de gestión (ERP) de escritorio para la Cervecería del Valle
-Sagrado (Cusco), escrito en **Python + Tkinter + SQLAlchemy**.
+Sagrado (Cusco), escrito en **Python + PySide6 + SQLAlchemy**.
 
 Esta es una versión **reescrita para ser fácil de leer, modificar y
 mantener por una sola persona**, incluso si recién está aprendiendo a
@@ -53,16 +53,14 @@ Las dependencias incluyen:
 
 | Paquete         | Para qué se usa                                      |
 | --------------- | ---------------------------------------------------- |
+| `PySide6`       | Framework GUI de escritorio (Qt6)                    |
 | `SQLAlchemy`    | Conexión y ORM de la base de datos (SQLite)          |
 | `reportlab`     | Generación de reportes en formato PDF                |
 | `openpyxl`      | Exportación de datos a archivos Excel (.xlsx)        |
 | `pytest`        | Ejecución de las pruebas automáticas                 |
 
 ```bash
-# 3) (Solo en Linux) si Tkinter no viene instalado con tu Python:
-sudo apt install python3-tk
-
-# 4) Ejecutar el programa
+# 3) Ejecutar el programa
 python main.py
 ```
 
@@ -90,11 +88,11 @@ referencia de S/ 15,000.
 
 - Al registrar una compra, puedes indicar una **fecha de vencimiento** por producto (formato `AAAA-MM-DD`, por ejemplo `2026-12-31`). Es
 opcional: si se deja vacía, el lote queda sin fecha de vencimiento.
-- **Ctrl+A** selecciona todo el texto dentro de cualquier campo de
-texto o combobox del programa.
+- **Ctrl+A** selecciona todo el texto dentro de cualquier campo de entrada o combobox del programa.
 - En el módulo de **Reportes**, puedes elegir el tipo de reporte
 (ventas, costos o inventario), aplicar filtros de fecha y exportar
 el resultado directamente a PDF o a Excel con un clic.
+- **Sistema de Tutorial**: En el primer acceso de un usuario, se muestra automáticamente un tutorial interactivo que guía por las principales funcionalidades. Puedes acceder a él en cualquier momento desde el botón "❓  Ayuda y tutorial" en la barra lateral.
 
 ## Correr las pruebas automáticas
 
@@ -125,10 +123,25 @@ app/
   logica_costos.py            → costo y margen de lotes producidos
   logica_reportes.py          → generar datos para reportes; exportar PDF y Excel
   logica_configuracion.py     → parámetros sueltos (ej: capital inicial)
-  ui/                         → todas las pantallas (Tkinter)
-    estilos.py                → paleta de colores y estilos ttk (un solo lugar)
+  ui/                         → todas las pantallas (PySide6)
+    estilos.py                → paleta de colores y estilos CSS (un solo lugar)
     logo.py                   → carga el logo de la empresa
-    vista_reportes.py         → pantalla de reportes y botones de exportación
+    widgets.py                → componentes reutilizables
+    tutorial.py               → sistema de tutorial interactivo
+    tutorial_data.py          → datos y textos del tutorial
+    tutorial_overlay.py       → overlay transparente para el tutorial
+    tutorial_practice.py      → actividades prácticas del tutorial
+    login.py                  → pantalla de ingreso de sesión
+    dialogo_creditos.py       → diálogo de créditos y autoría
+    dialogo_reporte.py        → diálogo de configuración de reportes
+    ventana_principal.py      → ventana principal (sidebar + vistas)
+    vista_dashboard.py        → panel de inicio/dashboard
+    vista_compras.py          → módulo de compras
+    vista_inventario.py       → módulo de inventario
+    vista_produccion.py       → módulo de producción
+    vista_ventas.py           → módulo de ventas
+    vista_costos.py           → módulo de costos
+    vista_admin.py            → módulo de administración
     assets/                   → imágenes (logo_grande.png, logo_chico.png)
 tests/
   test_logica.py              → pruebas automáticas
