@@ -23,6 +23,7 @@ from app.ui.estilos import fuente, poner_clase
 from app.ui.logo import cargar_logo
 from app.ui.widgets import BarraEstado
 from app.ui.tutorial import abrir_centro_ayuda, tal_vez_iniciar_tutorial_general
+from app.ui.dialogo_creditos import DialogoCreditos
 
 from app.ui.vista_dashboard import VistaDashboard
 from app.ui.vista_compras import VistaCompras
@@ -155,7 +156,7 @@ class VentanaPrincipal(QMainWindow):
 
         btn_creditos = QPushButton("ℹ️  Créditos")
         poner_clase(btn_creditos, "secundario")
-        btn_creditos.clicked.connect(lambda: mostrar_creditos(self))
+        btn_creditos.clicked.connect(lambda: DialogoCreditos(self).exec())
         sl.addWidget(btn_creditos)
 
         btn_salir = QPushButton("🚪  Cerrar sesión")
