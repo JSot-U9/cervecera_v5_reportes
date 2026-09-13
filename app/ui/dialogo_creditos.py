@@ -34,7 +34,7 @@ class DialogoCreditos(QDialog):
         super().__init__(parent)
         self.setWindowTitle("Créditos")
         self.setModal(True)
-        self.setStyleSheet("background: transparent;")
+        self.setStyleSheet("background: white;")
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
