@@ -28,6 +28,9 @@ venv/
 ENV/
 .env
 
+# Legacy UI (Tkinter)
+app/ui_tk_legacy/
+
 # PyInstaller
 #  Usually these files are written by a python script from a template
 #  before PyInstaller builds the exe, so as to inject date/other infos into it.
