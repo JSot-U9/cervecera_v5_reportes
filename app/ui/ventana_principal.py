@@ -32,15 +32,17 @@ from app.ui.vista_produccion import VistaProduccion
 from app.ui.vista_ventas import VistaVentas
 from app.ui.vista_costos import VistaCostos
 from app.ui.vista_admin import VistaAdmin
+from app.ui.vista_prediccion import VistaPrediccion
 
 DEFINICION_MODULOS = [
-    ("dashboard",  "🏠", "Inicio",         VistaDashboard),
-    ("compras",    "🛒", "Compras",         VistaCompras),
-    ("inventario", "📦", "Inventario",      VistaInventario),
-    ("produccion", "🍺", "Producción",      VistaProduccion),
-    ("ventas",     "💰", "Ventas",          VistaVentas),
-    ("costos",     "📊", "Costos",          VistaCostos),
-    ("admin",      "⚙️", "Administración",  VistaAdmin),
+    ("dashboard",   "🏠", "Inicio",              VistaDashboard),
+    ("compras",     "🛒", "Compras",              VistaCompras),
+    ("inventario",  "📦", "Inventario",           VistaInventario),
+    ("produccion",  "🍺", "Producción",           VistaProduccion),
+    ("ventas",      "💰", "Ventas",               VistaVentas),
+    ("costos",      "📊", "Costos",               VistaCostos),
+    ("prediccion",  "🔮", "Predicción Demanda",   VistaPrediccion),
+    ("admin",       "⚙️", "Administración",       VistaAdmin),
 ]
 
 

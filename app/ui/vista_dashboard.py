@@ -126,7 +126,18 @@ class VistaDashboard(QWidget):
             ).count()
 
             bajos = productos_bajo_minimo(db)
-            por_vencer = lotes_proximos_a_vencer(db, dias=30)
+            _lotes_vencer = lotes_proximos_a_vencer(db, dias=30)
+            # Extraer todo lo que necesita la UI *dentro* de la sesión para
+            # evitar DetachedInstanceError al acceder a relaciones lazy más tarde.
+            por_vencer = [
+                {
+                    "numero": lote.numero_lote,
+                    "nombre": (lote.producto.nombre
+                               if lote.producto else lote.numero_lote),
+                    "fecha_vencimiento": lote.fecha_vencimiento,
+                }
+                for lote in _lotes_vencer
+            ]
 
             hoy = date.today()
             ventas_del_mes = [
@@ -174,17 +185,18 @@ class VistaDashboard(QWidget):
         if por_vencer:
             for lote in por_vencer:
                 fila = QHBoxLayout()
-                dias_restantes = (lote.fecha_vencimiento - date.today()).days if lote.fecha_vencimiento else "?"
+                fv = lote["fecha_vencimiento"]
+                dias_restantes = (fv - date.today()).days if fv else "?"
                 critico = isinstance(dias_restantes, int) and dias_restantes <= 7
                 color = COLOR_ALERTA if critico else COLOR_ADVERTENCIA
                 icono = "🔴" if critico else "🟡"
-                nombre = lote.producto.nombre if hasattr(lote, "producto") and lote.producto else lote.numero
+                nombre = lote["nombre"]
                 lbl1 = QLabel(f"{icono}  {nombre}")
                 lbl1.setStyleSheet(f"color: {color};")
                 lbl1.setFont(fuente(9, negrita=True))
                 fila.addWidget(lbl1)
-                if lote.fecha_vencimiento:
-                    lbl2 = QLabel(f"  — Vence el {lote.fecha_vencimiento.strftime('%d/%m/%Y')}"
+                if fv:
+                    lbl2 = QLabel(f"  — Vence el {fv.strftime('%d/%m/%Y')}"
                                   f"  ({dias_restantes} días)")
                     lbl2.setStyleSheet(f"color: {COLOR_TEXTO_SECUNDARIO};")
                     lbl2.setFont(fuente(9))

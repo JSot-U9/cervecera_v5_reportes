@@ -70,12 +70,12 @@ def verificar_contrasena(contrasena_plana: str, hash_guardado: str) -> bool:
 # --------------------------------------------------------------------
 # Qué módulos ve cada rol en el menú lateral.
 MODULOS_POR_ROL = {
-    "ADMIN":      {"dashboard", "compras", "inventario", "produccion", "ventas", "costos", "admin"},
+    "ADMIN":      {"dashboard", "compras", "inventario", "produccion", "ventas", "costos", "prediccion", "admin"},
     "COMPRAS":    {"dashboard", "compras"},
     "INVENTARIO": {"dashboard", "inventario"},
-    "PRODUCCION": {"dashboard", "produccion", "inventario"},
-    "VENTAS":     {"dashboard", "ventas"},
-    "COSTOS":     {"dashboard", "costos"},
+    "PRODUCCION": {"dashboard", "produccion", "inventario", "prediccion"},
+    "VENTAS":     {"dashboard", "ventas", "prediccion"},
+    "COSTOS":     {"dashboard", "costos", "prediccion"},
 }
 
 # Qué acciones puede hacer cada rol dentro de cada módulo.
@@ -101,6 +101,12 @@ ACCIONES_POR_ROL = {
     "costos": {
         "ADMIN":  {"ver"},
         "COSTOS": {"ver"},
+    },
+    "prediccion": {
+        "ADMIN":      {"ver", "predecir", "entrenar"},
+        "VENTAS":     {"ver", "predecir"},
+        "PRODUCCION": {"ver", "predecir"},
+        "COSTOS":     {"ver", "predecir"},
     },
     "admin": {
         "ADMIN": {"ver", "crear", "desactivar"},

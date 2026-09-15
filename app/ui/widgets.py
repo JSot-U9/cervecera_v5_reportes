@@ -448,6 +448,7 @@ class MensajeEstado(QWidget):
             "exito": ("#D4EDDA", "#155724", "✓"),
             "error": ("#FDECEA", "#7B1111", "✗"),
             "advertencia": ("#FFF3CD", "#856404", "⚠"),
+            "info": ("#D1ECF1", "#0C5460", "ℹ"),
         }.get(tipo, ("#D4EDDA", "#155724", "✓"))
 
         frame = QFrame()

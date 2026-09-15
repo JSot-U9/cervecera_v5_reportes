@@ -5,3 +5,15 @@ pytest>=7.0.0,<9.0.0
 
 # Interfaz gráfica: PySide6 (Qt para Python, licencia LGPL).
 PySide6>=6.5.0,<7.0.0
+
+# Módulo de Predicción de Demanda (IA)
+xgboost>=2.0.0,<3.0.0
+scikit-learn>=1.3.0,<2.0.0
+pandas>=2.0.0,<3.0.0
+numpy>=1.24.0,<3.0.0
+joblib>=1.3.0,<2.0.0
+matplotlib>=3.7.0,<4.0.0
+
+# Simulación de datos de venta (herramientas/, opcional — solo para pruebas)
+# Si no se instala yfinance, el generador usa perfiles de volatilidad de respaldo.
+yfinance>=0.2.40
