@@ -123,6 +123,23 @@ class VistaCompras(QWidget):
             return None
         return self._abrir_nueva_orden()
 
+    def abrir_nueva_orden_prellenada(self, producto_id: int, cantidad_sugerida: float):
+        """
+        Abre el formulario de nueva orden de compra con un insumo y una
+        cantidad ya preseleccionados. Se usa desde el Centro de
+        Inteligencia al convertir una recomendación de reposición en
+        una orden de compra real (el usuario sigue debiendo elegir
+        proveedor y precio, y confirmar el guardado).
+        """
+        if not puede(sesion_actual.rol, "compras", "crear"):
+            return None
+        self.ultimo_dialogo_nueva_orden = VentanaNuevaOrden(
+            self.window(), al_guardar=self.refrescar,
+            producto_preseleccionado=producto_id, cantidad_sugerida=cantidad_sugerida,
+        )
+        self.ultimo_dialogo_nueva_orden.show()
+        return self.ultimo_dialogo_nueva_orden
+
     def abrir_reporte_para_tutorial(self):
         self._abrir_dialogo_reporte()
         return self.ultimo_dialogo_reporte
@@ -266,12 +283,15 @@ class VentanaNuevaOrden(QDialog):
     práctica guiada de una fase futura pueda seguir interactuando con
     la ventana principal detrás mientras este formulario está abierto."""
 
-    def __init__(self, parent, al_guardar):
+    def __init__(self, parent, al_guardar, producto_preseleccionado: int = None,
+                 cantidad_sugerida: float = None):
         super().__init__(parent)
         self.setWindowTitle("Nueva orden de compra")
         self.setModal(False)
         self.al_guardar = al_guardar
         self.items_agregados = []
+        self._producto_preseleccionado = producto_preseleccionado
+        self._cantidad_sugerida = cantidad_sugerida
 
         with nueva_sesion() as db:
             self.proveedores = listar_proveedores_activos(db)
@@ -415,6 +435,18 @@ class VentanaNuevaOrden(QDialog):
         cuerpo.addLayout(fila_btn)
 
         centrar_ventana(self, 780, 640)
+
+        if self._producto_preseleccionado is not None:
+            idx = self.combo_producto.findData(self._producto_preseleccionado)
+            if idx >= 0:
+                self.combo_producto.setCurrentIndex(idx)
+            if self._cantidad_sugerida:
+                self.entry_cantidad.setText(f"{self._cantidad_sugerida:.2f}")
+            self._msg.mostrar(
+                "Producto y cantidad prellenados desde una recomendación del Centro de Inteligencia. "
+                "Revisa el proveedor y el precio antes de agregarlo a la orden.",
+                tipo="info", duracion_ms=8000,
+            )
 
     def _autocompletar_precio(self):
         producto_id = self.combo_producto.currentData()
