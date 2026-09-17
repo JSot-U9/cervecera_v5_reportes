@@ -21,9 +21,11 @@ from app.logica_autenticacion import cerrar_sesion
 from app.logica_configuracion import obtener_parametro
 from app.ui.estilos import fuente, poner_clase
 from app.ui.logo import cargar_logo
-from app.ui.widgets import BarraEstado
+from app.ui.widgets import BarraEstado, ejecutar_con_carga
+from app.ui.header import HeaderSuperior
 from app.ui.tutorial import abrir_centro_ayuda, tal_vez_iniciar_tutorial_general
 from app.ui.dialogo_creditos import mostrar_creditos
+from app.logica_inventario import productos_bajo_minimo, lotes_proximos_a_vencer
 
 from app.ui.vista_dashboard import VistaDashboard
 from app.ui.vista_compras import VistaCompras
@@ -35,17 +37,47 @@ from app.ui.vista_admin import VistaAdmin
 from app.ui.vista_prediccion import VistaPrediccion
 from app.ui.vista_centro_inteligencia import VistaCentroInteligencia
 
+# (clave, icono, etiqueta, clase_de_vista, sección_de_sidebar)
+# La sección agrupa el menú lateral tal como pide el rediseño UI/UX
+# (OPERACIÓN / ANÁLISIS / INTELIGENCIA / ADMINISTRACIÓN); "" = sin
+# grupo (Inicio va suelto, arriba de todo).
 DEFINICION_MODULOS = [
-    ("dashboard",           "🏠", "Inicio",                  VistaDashboard),
-    ("compras",             "🛒", "Compras",                  VistaCompras),
-    ("inventario",          "📦", "Inventario",               VistaInventario),
-    ("produccion",          "🍺", "Producción",               VistaProduccion),
-    ("ventas",              "💰", "Ventas",                   VistaVentas),
-    ("costos",              "📊", "Costos",                   VistaCostos),
-    ("prediccion",          "🔮", "Predicción Demanda",       VistaPrediccion),
-    ("centro_inteligencia", "🧠", "Centro de Inteligencia",   VistaCentroInteligencia),
-    ("admin",               "⚙️", "Administración",           VistaAdmin),
+    ("dashboard",           "🏠", "Inicio",                  VistaDashboard,             ""),
+    ("compras",             "🛒", "Compras",                  VistaCompras,               "OPERACIÓN"),
+    ("inventario",          "📦", "Inventario",               VistaInventario,            "OPERACIÓN"),
+    ("produccion",          "🍺", "Producción",               VistaProduccion,            "OPERACIÓN"),
+    ("ventas",              "💰", "Ventas",                   VistaVentas,                "OPERACIÓN"),
+    ("costos",              "📊", "Costos",                   VistaCostos,                "ANÁLISIS"),
+    ("prediccion",          "🔮", "Predicción Demanda",       VistaPrediccion,            "ANÁLISIS"),
+    ("centro_inteligencia", "🧠", "Centro de Inteligencia",   VistaCentroInteligencia,    "INTELIGENCIA"),
+    ("admin",               "⚙️", "Administración",           VistaAdmin,                 "ADMINISTRACIÓN"),
 ]
+
+# Título y breadcrumb mostrados en el header superior por cada módulo.
+_TITULOS_MODULO = {
+    "dashboard":            ("Inicio", ["Inicio"]),
+    "compras":              ("Compras", ["Operación", "Compras"]),
+    "inventario":           ("Inventario", ["Operación", "Inventario"]),
+    "produccion":           ("Producción", ["Operación", "Producción"]),
+    "ventas":               ("Ventas", ["Operación", "Ventas"]),
+    "costos":               ("Costos", ["Análisis", "Costos"]),
+    "prediccion":           ("Predicción de Demanda", ["Análisis", "Predicción Demanda"]),
+    "centro_inteligencia":  ("Centro de Inteligencia", ["Inteligencia", "Centro de Inteligencia"]),
+    "admin":                ("Administración", ["Administración"]),
+}
+
+# A qué módulo/tabla/tabla-interna navegar cuando se elige un resultado
+# de la búsqueda global (ver app/logica_busqueda.py):
+#   tipo -> (modulo, índice de pestaña o None, atributo de TablaDatos)
+_MAPA_RESULTADOS_BUSQUEDA = {
+    "producto":   ("inventario", 3, "tabla_catalogo"),
+    "lote":       ("inventario", 1, "tabla_lotes"),
+    "produccion": ("produccion", None, "tabla"),
+    "compra":     ("compras", 0, "tabla_ordenes"),
+    "proveedor":  ("compras", 1, "tabla_proveedores"),
+    "venta":      ("ventas", 0, "tabla_ventas"),
+    "cliente":    ("ventas", 1, "tabla_clientes"),
+}
 
 
 class VentanaPrincipal(QMainWindow):
@@ -66,6 +98,8 @@ class VentanaPrincipal(QMainWindow):
         self._clave_activa: str = ""
 
         QShortcut(QKeySequence("F5"), self).activated.connect(self._refrescar_activo)
+        QShortcut(QKeySequence("Ctrl+K"), self).activated.connect(
+            lambda: self._header.enfocar_busqueda())
 
         central = QWidget()
         self.setCentralWidget(central)
@@ -80,14 +114,27 @@ class VentanaPrincipal(QMainWindow):
 
         self._crear_sidebar(fila)
 
+        # ── Columna derecha: header superior + contenido de módulo ──
+        columna_derecha = QVBoxLayout()
+        columna_derecha.setContentsMargins(0, 0, 0, 0)
+        columna_derecha.setSpacing(0)
+        fila.addLayout(columna_derecha, stretch=1)
+
+        self._header = HeaderSuperior()
+        self._header.establecer_usuario(sesion_actual.nombre_completo, sesion_actual.rol)
+        self._header.resultadoSeleccionado.connect(self._ir_a_resultado_busqueda)
+        self._header.notificacionesClic.connect(lambda: self._navegar("dashboard"))
+        columna_derecha.addWidget(self._header)
+
         self._stack = QStackedWidget()
-        fila.addWidget(self._stack, stretch=1)
+        columna_derecha.addWidget(self._stack, stretch=1)
 
         barra_estado = BarraEstado(usuario=sesion_actual.nombre_completo, rol=sesion_actual.rol)
         layout_central.addWidget(barra_estado)
 
         self._crear_vistas()
         self._navegar("dashboard")
+        self._actualizar_notificaciones()
 
         # Al terminar de construir la ventana, revisa si corresponde
         # mostrar el tour general (primer ingreso de este usuario).
@@ -128,9 +175,13 @@ class VentanaPrincipal(QMainWindow):
 
         sl.addWidget(self._separador())
 
-        for clave, icono, etiqueta, _fabrica in DEFINICION_MODULOS:
+        seccion_actual = None
+        for clave, icono, etiqueta, _fabrica, seccion in DEFINICION_MODULOS:
             if clave not in self._modulos_permitidos:
                 continue
+            if seccion and seccion != seccion_actual:
+                sl.addWidget(self._encabezado_seccion(seccion))
+            seccion_actual = seccion
             boton = QPushButton(f"{icono}   {etiqueta}")
             poner_clase(boton, "sidebar")
             boton.clicked.connect(lambda checked=False, c=clave: self._navegar(c))
@@ -175,12 +226,22 @@ class VentanaPrincipal(QMainWindow):
         fondo(sep, "#3D4F28")
         return sep
 
+    def _encabezado_seccion(self, texto: str) -> QLabel:
+        """Etiqueta de agrupación del menú lateral (OPERACIÓN, ANÁLISIS,
+        INTELIGENCIA, ADMINISTRACIÓN) — separa lo operativo de lo
+        administrativo y ayuda al usuario a ubicarse (sección 7)."""
+        lbl = QLabel(texto)
+        lbl.setStyleSheet("background: transparent; color: #8FA07A;")
+        lbl.setFont(fuente(7, negrita=True))
+        lbl.setContentsMargins(8, 10, 0, 2)
+        return lbl
+
     def _abrir_ayuda(self):
         abrir_centro_ayuda(self)
 
     # ── Vistas ────────────────────────────────────────────────────
     def _crear_vistas(self):
-        for clave, _icono, _texto, fabrica in DEFINICION_MODULOS:
+        for clave, _icono, _texto, fabrica, _seccion in DEFINICION_MODULOS:
             if clave not in self._modulos_permitidos:
                 continue
             vista = fabrica()
@@ -196,8 +257,41 @@ class VentanaPrincipal(QMainWindow):
             poner_clase(self._botones_menu[clave], "sidebarActivo")
         self._clave_activa = clave
         self._stack.setCurrentWidget(self._vistas[clave])
-        if hasattr(self._vistas[clave], "refrescar"):
-            self._vistas[clave].refrescar()
+        titulo, migas = _TITULOS_MODULO.get(clave, (clave.title(), [clave.title()]))
+        self._header.establecer_titulo(titulo, migas)
+        vista = self._vistas[clave]
+        if hasattr(vista, "refrescar"):
+            ejecutar_con_carga(self._stack, vista.refrescar, mensaje=f"Cargando {titulo}...")
+        self._actualizar_notificaciones()
+
+    # ── Búsqueda global (header) ─────────────────────────────────────
+    def _ir_a_resultado_busqueda(self, resultado: dict):
+        tipo = resultado.get("tipo")
+        destino = _MAPA_RESULTADOS_BUSQUEDA.get(tipo)
+        if not destino:
+            return
+        modulo, indice_pestana, atributo_tabla = destino
+        if modulo not in self._vistas:
+            return
+        self._navegar(modulo)
+        vista = self._vistas[modulo]
+        if indice_pestana is not None and hasattr(vista, "notebook"):
+            vista.notebook.setCurrentIndex(indice_pestana)
+        tabla = getattr(vista, atributo_tabla, None)
+        if tabla is not None and hasattr(tabla, "filtrar"):
+            tabla.filtrar(resultado.get("texto_filtro", ""))
+
+    # ── Notificaciones (header) ──────────────────────────────────────
+    def _actualizar_notificaciones(self):
+        """Cuenta rápida y barata (sin IA) de asuntos que requieren
+        atención, para el badge de la campana del header."""
+        try:
+            from app.basedatos import nueva_sesion
+            with nueva_sesion() as db:
+                cantidad = len(productos_bajo_minimo(db)) + len(lotes_proximos_a_vencer(db, dias=30))
+            self._header.establecer_notificaciones(cantidad)
+        except Exception:
+            pass
 
     # ── API pública ───────────────────────────────────────────────
     def navegar(self, clave: str):

@@ -14,7 +14,7 @@ from PySide6.QtWidgets import (
 from app.basedatos import nueva_sesion
 from app.modelos import Producto, LoteInventario, Proveedor
 from app.sesion import sesion_actual
-from app.seguridad import puede
+from app.seguridad import puede, modulos_visibles
 from app.logica_compras import (
     registrar_compra, listar_ordenes_compra, listar_proveedores_activos,
     crear_proveedor, actualizar_proveedor,
@@ -67,6 +67,10 @@ class VistaCompras(QWidget):
                 "＋  Nueva orden", self._abrir_nueva_orden)
         self.tutorial_targets["btn_reporte"] = barra.agregar_boton(
             "📊  Reporte", self._abrir_dialogo_reporte, estilo="accionSecundaria")
+        if "centro_inteligencia" in modulos_visibles(sesion_actual.rol):
+            barra.agregar_boton(
+                "🧠  Reposición recomendada", lambda: self._ir_a_inteligencia(),
+                estilo="accionSecundaria")
         pl.addWidget(barra)
 
         self.tabla_ordenes = TablaDatos(
@@ -97,6 +101,13 @@ class VistaCompras(QWidget):
                     "Teléfono": 120, "Correo": 180},
         )
         pl.addWidget(self.tabla_proveedores, stretch=1)
+
+    def _ir_a_inteligencia(self):
+        """Enlace de integración IA (sección 28): reposición recomendada
+        de insumos, calculada en el Centro de Inteligencia."""
+        ventana = self.window()
+        if hasattr(ventana, "navegar"):
+            ventana.navegar("centro_inteligencia")
 
     def refrescar(self):
         with nueva_sesion() as db:

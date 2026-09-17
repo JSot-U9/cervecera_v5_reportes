@@ -14,7 +14,7 @@ from PySide6.QtWidgets import (
 from app.basedatos import nueva_sesion
 from app.modelos import OrdenProduccion
 from app.sesion import sesion_actual
-from app.seguridad import puede
+from app.seguridad import puede, modulos_visibles
 from app.logica_produccion import (
     crear_orden, iniciar_proceso, cerrar_orden, listar_ordenes, listar_recetas_activas,
 )
@@ -73,6 +73,10 @@ class VistaProduccion(QWidget):
                 "✔  Cerrar orden", self._abrir_cerrar_orden, estilo="accionSecundaria")
         self.tutorial_targets["btn_reporte"] = barra.agregar_boton(
             "📊  Reporte", self._abrir_dialogo_reporte, estilo="accionSecundaria")
+        if "centro_inteligencia" in modulos_visibles(sesion_actual.rol):
+            barra.agregar_boton(
+                "🧠  Merma esperada", lambda: self._ir_a_inteligencia(),
+                estilo="accionSecundaria")
         btn_ayuda = QPushButton("❓")
         btn_ayuda.setFixedWidth(30)
         poner_clase(btn_ayuda, "secundario")
@@ -91,6 +95,13 @@ class VistaProduccion(QWidget):
         self.tutorial_targets["tabla_ordenes"] = self.tabla
 
         self.refrescar()
+
+    def _ir_a_inteligencia(self):
+        """Enlace de integración IA (sección 28): predicción de merma
+        esperada, calculada en el Centro de Inteligencia."""
+        ventana = self.window()
+        if hasattr(ventana, "navegar"):
+            ventana.navegar("centro_inteligencia")
 
     def refrescar(self):
         with nueva_sesion() as db:

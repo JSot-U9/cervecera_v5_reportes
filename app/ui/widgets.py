@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
     QWidget, QLabel, QFrame, QVBoxLayout, QHBoxLayout, QPushButton,
     QLineEdit, QComboBox, QTableWidget, QTableWidgetItem, QHeaderView,
     QAbstractItemView, QGroupBox, QDialog, QApplication, QGraphicsDropShadowEffect,
+    QProgressBar,
 )
 from PySide6.QtGui import QColor
 
@@ -559,6 +560,248 @@ def confirmar(parent, titulo: str, mensaje: str,
 # ══════════════════════════════════════════════════════════════════
 #  BARRA DE ESTADO INFERIOR
 # ══════════════════════════════════════════════════════════════════
+
+class Migaja(QWidget):
+    """Breadcrumb: 'Inventario › Productos › Anka Chida'. El último
+    elemento se muestra resaltado para indicar la ubicación actual."""
+
+    def __init__(self, partes: list = None, parent=None):
+        super().__init__(parent)
+        self._layout = QHBoxLayout(self)
+        self._layout.setContentsMargins(0, 0, 0, 0)
+        self._layout.setSpacing(4)
+        self.establecer(partes or [])
+
+    def establecer(self, partes: list):
+        while self._layout.count():
+            item = self._layout.takeAt(0)
+            w = item.widget()
+            if w is not None:
+                w.deleteLater()
+        for i, parte in enumerate(partes):
+            es_ultimo = (i == len(partes) - 1)
+            if i > 0:
+                sep = QLabel("›")
+                sep.setStyleSheet(f"background: transparent; color: {COLOR_TEXTO_SECUNDARIO};")
+                sep.setFont(fuente(9))
+                self._layout.addWidget(sep)
+            lbl = QLabel(str(parte))
+            color = COLOR_TEXTO if es_ultimo else COLOR_TEXTO_SECUNDARIO
+            lbl.setFont(fuente(9, negrita=es_ultimo))
+            lbl.setStyleSheet(f"background: transparent; color: {color};")
+            self._layout.addWidget(lbl)
+        self._layout.addStretch()
+
+
+# ══════════════════════════════════════════════════════════════════
+#  ESTADO VACÍO
+# ══════════════════════════════════════════════════════════════════
+
+class EstadoVacio(QWidget):
+    """Mensaje para listas/tablas sin datos: siempre indica qué puede
+    hacer el usuario a continuación, nunca solo 'No hay datos.'"""
+
+    def __init__(self, icono: str, titulo: str, descripcion: str = "",
+                 texto_accion: str = "", accion=None, parent=None):
+        super().__init__(parent)
+        layout = QVBoxLayout(self)
+        layout.setAlignment(Qt.AlignCenter)
+        layout.setSpacing(6)
+        layout.setContentsMargins(20, 30, 20, 30)
+
+        lbl_icono = QLabel(icono)
+        lbl_icono.setFont(fuente(30))
+        lbl_icono.setAlignment(Qt.AlignCenter)
+        lbl_icono.setStyleSheet("background: transparent;")
+        layout.addWidget(lbl_icono)
+
+        lbl_titulo = QLabel(titulo)
+        lbl_titulo.setFont(fuente(11, negrita=True))
+        lbl_titulo.setAlignment(Qt.AlignCenter)
+        lbl_titulo.setStyleSheet(f"background: transparent; color: {COLOR_TEXTO};")
+        layout.addWidget(lbl_titulo)
+
+        if descripcion:
+            lbl_desc = QLabel(descripcion)
+            lbl_desc.setFont(fuente(9))
+            lbl_desc.setAlignment(Qt.AlignCenter)
+            lbl_desc.setWordWrap(True)
+            lbl_desc.setMaximumWidth(360)
+            lbl_desc.setStyleSheet(f"background: transparent; color: {COLOR_TEXTO_SECUNDARIO};")
+            layout.addWidget(lbl_desc, alignment=Qt.AlignCenter)
+
+        if texto_accion and accion:
+            fila = QHBoxLayout()
+            fila.addStretch()
+            btn = QPushButton(texto_accion)
+            btn.clicked.connect(accion)
+            fila.addWidget(btn)
+            fila.addStretch()
+            layout.addLayout(fila)
+
+
+# ══════════════════════════════════════════════════════════════════
+#  TARJETA DE ACCIÓN (alertas accionables del Dashboard)
+# ══════════════════════════════════════════════════════════════════
+
+class TarjetaAccion(QFrame):
+    """Tarjeta clickeable para la sección 'Requiere tu atención' del
+    Dashboard: ícono + color según severidad, texto y un botón que
+    lleva directo al módulo donde se resuelve el problema.
+    severidad: "critico" | "riesgo" | "atencion" | "info" """
+
+    clicked = Signal()
+
+    _COLOR = {"critico": COLOR_ALERTA, "riesgo": "#E07B00",
+              "atencion": COLOR_ADVERTENCIA, "info": "#2B6CB0"}
+    _ICONO = {"critico": "🔴", "riesgo": "🟠", "atencion": "🟡", "info": "🔵"}
+
+    def __init__(self, titulo: str, descripcion: str, severidad: str = "atencion",
+                 texto_boton: str = "Revisar", al_clic=None, parent=None):
+        super().__init__(parent)
+        color = self._COLOR.get(severidad, COLOR_ADVERTENCIA)
+        icono = self._ICONO.get(severidad, "🟡")
+        fondo(self, COLOR_TARJETA,
+              f"border: 1px solid {_COLOR_SEPARADOR}; border-left: 4px solid {color}; "
+              f"border-radius: 6px;")
+        self.setCursor(Qt.PointingHandCursor)
+
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(14, 10, 14, 10)
+        layout.setSpacing(10)
+
+        lbl_icono = QLabel(icono)
+        lbl_icono.setFont(fuente(14))
+        lbl_icono.setStyleSheet("background: transparent;")
+        layout.addWidget(lbl_icono, alignment=Qt.AlignTop)
+
+        col = QVBoxLayout()
+        col.setSpacing(1)
+        lbl_t = QLabel(titulo)
+        lbl_t.setFont(fuente(10, negrita=True))
+        lbl_t.setWordWrap(True)
+        lbl_t.setStyleSheet(f"background: transparent; color: {COLOR_TEXTO};")
+        col.addWidget(lbl_t)
+        lbl_d = QLabel(descripcion)
+        lbl_d.setFont(fuente(9))
+        lbl_d.setWordWrap(True)
+        lbl_d.setStyleSheet(f"background: transparent; color: {COLOR_TEXTO_SECUNDARIO};")
+        col.addWidget(lbl_d)
+        layout.addLayout(col, stretch=1)
+
+        btn = QPushButton(texto_boton)
+        poner_clase(btn, "accionSecundaria")
+        btn.clicked.connect(self._disparar)
+        layout.addWidget(btn, alignment=Qt.AlignVCenter)
+
+        self._al_clic = al_clic
+
+    def mousePressEvent(self, evento):
+        if evento.button() == Qt.LeftButton:
+            self._disparar()
+        super().mousePressEvent(evento)
+
+    def _disparar(self):
+        self.clicked.emit()
+        if self._al_clic:
+            self._al_clic()
+
+
+# ══════════════════════════════════════════════════════════════════
+#  INDICADOR DE CARGA (feedback durante operaciones que demoran)
+# ══════════════════════════════════════════════════════════════════
+
+class IndicadorCarga(QWidget):
+    """Overlay de carga (sección 20): cubre a su widget padre mientras
+    dura una operación que puede demorar — cambio de pantalla/pestaña,
+    cálculo de IA, generación de reportes — para que la ventana nunca
+    se vea congelada. Normalmente no se usa directamente: ver
+    ejecutar_con_carga() más abajo."""
+
+    def __init__(self, parent: QWidget):
+        super().__init__(parent)
+        self.setAttribute(Qt.WA_StyledBackground, True)
+        self.setStyleSheet("background-color: rgba(250, 248, 240, 0.94);")
+
+        layout = QVBoxLayout(self)
+        layout.setAlignment(Qt.AlignCenter)
+        layout.setSpacing(10)
+
+        self._lbl_icono = QLabel("⏳")
+        self._lbl_icono.setFont(fuente(24))
+        self._lbl_icono.setAlignment(Qt.AlignCenter)
+        self._lbl_icono.setStyleSheet("background: transparent;")
+        layout.addWidget(self._lbl_icono)
+
+        self._lbl_mensaje = QLabel("Cargando...")
+        self._lbl_mensaje.setFont(fuente(10, negrita=True))
+        self._lbl_mensaje.setAlignment(Qt.AlignCenter)
+        self._lbl_mensaje.setStyleSheet(f"background: transparent; color: {COLOR_TEXTO};")
+        layout.addWidget(self._lbl_mensaje)
+
+        self._lbl_submensaje = QLabel("")
+        self._lbl_submensaje.setFont(fuente(9))
+        self._lbl_submensaje.setAlignment(Qt.AlignCenter)
+        self._lbl_submensaje.setWordWrap(True)
+        self._lbl_submensaje.setMaximumWidth(320)
+        self._lbl_submensaje.setStyleSheet(f"background: transparent; color: {COLOR_TEXTO_SECUNDARIO};")
+        layout.addWidget(self._lbl_submensaje, alignment=Qt.AlignCenter)
+
+        self._barra = QProgressBar()
+        self._barra.setRange(0, 0)  # indeterminado: no conocemos el avance real
+        self._barra.setFixedWidth(220)
+        self._barra.setTextVisible(False)
+        layout.addWidget(self._barra, alignment=Qt.AlignCenter)
+
+        self.hide()
+
+    def establecer_texto(self, mensaje: str, submensaje: str = "", icono: str = "⏳"):
+        self._lbl_icono.setText(icono)
+        self._lbl_mensaje.setText(mensaje)
+        self._lbl_submensaje.setText(submensaje)
+        self._lbl_submensaje.setVisible(bool(submensaje))
+
+    def mostrar(self):
+        padre = self.parentWidget()
+        if padre is not None:
+            self.setGeometry(padre.rect())
+        self.raise_()
+        self.show()
+        # Fuerza el repintado inmediato: sin esto, el overlay no se
+        # vería hasta que Qt procese eventos por su cuenta, es decir,
+        # después de que termine la operación que estamos anunciando.
+        QApplication.processEvents()
+
+    def ocultar(self):
+        self.hide()
+
+    def showEvent(self, evento):
+        padre = self.parentWidget()
+        if padre is not None:
+            self.setGeometry(padre.rect())
+        super().showEvent(evento)
+
+
+def ejecutar_con_carga(contenedor: QWidget, funcion, mensaje: str = "Cargando...",
+                        submensaje: str = "", icono: str = "⏳"):
+    """Ejecuta `funcion` (sin argumentos) mostrando un overlay de carga
+    sobre `contenedor` mientras dura, para que ningún cambio de
+    pantalla/pestaña ni cálculo de IA deje la ventana con aspecto de
+    congelada (sección 20). Reutiliza un único overlay por contenedor.
+    Devuelve lo que retorne `funcion`; si lanza una excepción, el
+    overlay igual se oculta antes de relanzarla, para que el llamador
+    la maneje como siempre."""
+    overlay = getattr(contenedor, "_indicador_carga", None)
+    if overlay is None or overlay.parentWidget() is not contenedor:
+        overlay = IndicadorCarga(contenedor)
+        contenedor._indicador_carga = overlay
+    overlay.establecer_texto(mensaje, submensaje, icono)
+    overlay.mostrar()
+    try:
+        return funcion()
+    finally:
+        overlay.ocultar()
+
 
 class BarraEstado(QFrame):
     """Barra inferior con información del sistema."""

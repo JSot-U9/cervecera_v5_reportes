@@ -37,6 +37,7 @@ from app.ui.estilos import (
 )
 from app.ui.widgets import (
     EncabezadoModulo, TarjetaKPI, MensajeEstado, TablaDatos, SeccionFormulario,
+    ejecutar_con_carga,
 )
 
 from app.ia import reposicion as motor_reposicion
@@ -150,14 +151,15 @@ class VistaCentroInteligencia(QWidget):
 
     def _calcular_reposicion(self):
         horizonte = self.combo_horizonte_reposicion.currentData()
-        QApplication.setOverrideCursor(Qt.WaitCursor)
         try:
-            recomendaciones = motor_reposicion.calcular_recomendaciones(horizonte_dias=horizonte)
+            recomendaciones = ejecutar_con_carga(
+                self, lambda: motor_reposicion.calcular_recomendaciones(horizonte_dias=horizonte),
+                mensaje="🧠  Calculando reposición inteligente...",
+                submensaje="Analizando stock, demanda esperada y consumo histórico...",
+            )
         except Exception as e:
-            QApplication.restoreOverrideCursor()
             self._msg.mostrar(f"No se pudo calcular la reposición: {e}", tipo="error")
             return
-        QApplication.restoreOverrideCursor()
 
         self._recomendaciones_actuales = recomendaciones
         filas = [
@@ -304,14 +306,15 @@ class VistaCentroInteligencia(QWidget):
 
     def _entrenar_modelo_merma(self):
         from app.ia.merma_training import entrenar as entrenar_merma
-        QApplication.setOverrideCursor(Qt.WaitCursor)
         try:
-            resultado = entrenar_merma()
+            resultado = ejecutar_con_carga(
+                self, entrenar_merma,
+                mensaje="🧠  Entrenando modelo de merma...",
+                submensaje="Procesando el historial de órdenes de producción completadas...",
+            )
         except Exception as e:
-            QApplication.restoreOverrideCursor()
             self._msg.mostrar(f"No se pudo entrenar el modelo de merma: {e}", tipo="error")
             return
-        QApplication.restoreOverrideCursor()
 
         if resultado.get("exito"):
             m = resultado.get("metricas", {})
@@ -403,26 +406,31 @@ class VistaCentroInteligencia(QWidget):
         horizonte = self.combo_horizonte_demanda.currentData()
         productos = listar_productos_con_ventas()
 
-        QApplication.setOverrideCursor(Qt.WaitCursor)
-        filas, tags = [], []
-        n_pronosticados = 0
-        for p in productos:
-            diag = diagnostico_historial(p["id"])
-            if not diag["suficiente_baseline"]:
-                continue
-            pred = predecir_demanda(p["id"], horizonte)
-            if not pred.get("exito"):
-                continue
-            n_pronosticados += 1
-            en_riesgo = pred["demanda_total"] > 0 and not pred.get("usando_ml", False)
-            filas.append([
-                f"{p['nombre']} ({p['unidad']})",
-                f"{pred['demanda_total']:.1f}",
-                f"{pred['promedio_diario']:.1f}",
-                "⚠️ Estimación básica" if not pred.get("usando_ml") else "🟢 Modelo IA",
-            ])
-            tags.append("advertencia" if not pred.get("usando_ml") else "normal")
-        QApplication.restoreOverrideCursor()
+        def _calcular():
+            filas, tags = [], []
+            n_pronosticados = 0
+            for p in productos:
+                diag = diagnostico_historial(p["id"])
+                if not diag["suficiente_baseline"]:
+                    continue
+                pred = predecir_demanda(p["id"], horizonte)
+                if not pred.get("exito"):
+                    continue
+                n_pronosticados += 1
+                filas.append([
+                    f"{p['nombre']} ({p['unidad']})",
+                    f"{pred['demanda_total']:.1f}",
+                    f"{pred['promedio_diario']:.1f}",
+                    "⚠️ Estimación básica" if not pred.get("usando_ml") else "🟢 Modelo IA",
+                ])
+                tags.append("advertencia" if not pred.get("usando_ml") else "normal")
+            return filas, tags, n_pronosticados
+
+        filas, tags, n_pronosticados = ejecutar_con_carga(
+            self, _calcular,
+            mensaje="🧠  Analizando demanda...",
+            submensaje="Procesando información histórica de ventas por producto...",
+        )
 
         self.tabla_demanda.cargar_filas(filas, tags_por_fila=tags)
         self.kpi_productos_pronosticados.actualizar(str(n_pronosticados))

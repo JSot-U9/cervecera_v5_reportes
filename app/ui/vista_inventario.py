@@ -12,7 +12,7 @@ from PySide6.QtWidgets import (
 from app.basedatos import nueva_sesion
 from app.modelos import Producto, LoteInventario, MovimientoInventario
 from app.sesion import sesion_actual
-from app.seguridad import puede
+from app.seguridad import puede, modulos_visibles
 from app.logica_inventario import stock_total, ajustar_stock
 from app.ui.widgets import (
     EncabezadoModulo, BarraBusqueda, TablaDatos, SeccionFormulario, MensajeEstado,
@@ -61,6 +61,10 @@ class VistaInventario(QWidget):
                                placeholder="🔎  Buscar producto...")
         self.tutorial_targets["btn_reporte"] = barra.agregar_boton(
             "📊  Reporte", lambda: self._abrir_dialogo_reporte("stock"), estilo="accionSecundaria")
+        if "centro_inteligencia" in modulos_visibles(sesion_actual.rol):
+            barra.agregar_boton(
+                "🧠  Riesgo de quiebre", lambda: self._ir_a_inteligencia(),
+                estilo="accionSecundaria")
         pl.addWidget(barra)
 
         self.tabla_stock = TablaDatos(
@@ -146,6 +150,13 @@ class VistaInventario(QWidget):
         )
         pl.addWidget(self.tabla_catalogo, stretch=1)
         self.tutorial_targets["tabla_catalogo"] = self.tabla_catalogo
+
+    def _ir_a_inteligencia(self):
+        """Enlace de integración IA (sección 28): lleva al Centro de
+        Inteligencia para ver la reposición recomendada de insumos."""
+        ventana = self.window()
+        if hasattr(ventana, "navegar"):
+            ventana.navegar("centro_inteligencia")
 
     def refrescar(self):
         with nueva_sesion() as db:

@@ -12,7 +12,7 @@ from PySide6.QtWidgets import (
 from app.basedatos import nueva_sesion
 from app.modelos import Producto
 from app.sesion import sesion_actual
-from app.seguridad import puede
+from app.seguridad import puede, modulos_visibles
 from app.logica_ventas import registrar_venta, listar_ordenes_venta, listar_clientes_activos, crear_cliente
 from app.logica_inventario import StockInsuficiente
 from app.ui.widgets import (
@@ -57,6 +57,10 @@ class VistaVentas(QWidget):
                 "＋  Nueva venta", self._abrir_nueva_venta)
         self.tutorial_targets["btn_reporte"] = barra.agregar_boton(
             "📊  Reporte", self._abrir_dialogo_reporte, estilo="accionSecundaria")
+        if "prediccion" in modulos_visibles(sesion_actual.rol):
+            barra.agregar_boton(
+                "🧠  Demanda prevista", lambda: self._ir_a_prediccion(),
+                estilo="accionSecundaria")
         pl.addWidget(barra)
 
         self.tabla_ventas = TablaDatos(
@@ -85,6 +89,13 @@ class VistaVentas(QWidget):
         )
         pl.addWidget(self.tabla_clientes, stretch=1)
         self.tutorial_targets["tabla_clientes"] = self.tabla_clientes
+
+    def _ir_a_prediccion(self):
+        """Enlace de integración IA (sección 28): demanda prevista de
+        cada producto, calculada en el módulo de Predicción."""
+        ventana = self.window()
+        if hasattr(ventana, "navegar"):
+            ventana.navegar("prediccion")
 
     def refrescar(self):
         with nueva_sesion() as db:
