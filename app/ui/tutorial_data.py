@@ -224,7 +224,9 @@ def _tutorial_compras() -> Tutorial:
             abrir=lambda vista: vista.abrir_nueva_orden_para_tutorial(),
             icono="🏭", titulo="Selecciona el proveedor",
             texto="Elige de la lista el proveedor al que le compraste. Si "
-                  "aún no está registrado, se crea desde la pestaña «Proveedores».",
+                  "aún no está registrado, se crea desde la pestaña «Proveedores». "
+                  "Cada orden es a un solo proveedor — si compraste a varios, se "
+                  "registra una orden separada por cada uno.",
             target=_td("combo_proveedor"),
         ),
         PasoTutorial(

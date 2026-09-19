@@ -13,10 +13,10 @@ from app.basedatos import nueva_sesion
 from app.modelos import Producto, LoteInventario, MovimientoInventario
 from app.sesion import sesion_actual
 from app.seguridad import puede, modulos_visibles
-from app.logica_inventario import stock_total, ajustar_stock
+from app.logica_inventario import stock_total, ajustar_stock, siguiente_codigo
 from app.ui.widgets import (
     EncabezadoModulo, BarraBusqueda, TablaDatos, SeccionFormulario, MensajeEstado,
-    centrar_ventana, formatear_estado,
+    centrar_ventana, formatear_estado, BotonAyuda,
 )
 from app.ui.estilos import COLOR_TEXTO_SECUNDARIO, COLOR_PRIMARIO, fuente, poner_clase, fondo
 
@@ -95,11 +95,7 @@ class VistaInventario(QWidget):
         lbl_fifo.setStyleSheet(f"color: {COLOR_TEXTO_SECUNDARIO};")
         lbl_fifo.setFont(fuente(8, cursiva=True))
         fila_fifo.addWidget(lbl_fifo)
-        btn_ayuda_fifo = QPushButton("❓")
-        btn_ayuda_fifo.setFixedWidth(30)
-        poner_clase(btn_ayuda_fifo, "secundario")
-        btn_ayuda_fifo.clicked.connect(
-            lambda: QMessageBox.information(self, "¿Qué es FIFO?", _TEXTO_FIFO))
+        btn_ayuda_fifo = BotonAyuda("¿Qué es FIFO?", _TEXTO_FIFO)
         fila_fifo.addWidget(btn_ayuda_fifo)
         fila_fifo.addStretch()
         pl.addLayout(fila_fifo)
@@ -371,17 +367,19 @@ class VentanaProducto(QDialog):
         cuerpo.addWidget(sec)
 
         self.entrada_codigo = QLineEdit()
-        self.entrada_codigo.setPlaceholderText("Ej: INS-014")
+        self.entrada_codigo.setReadOnly(True)
+        self.entrada_codigo.setStyleSheet(f"color: {COLOR_TEXTO_SECUNDARIO};")
         self.entrada_nombre = QLineEdit()
         self.combo_tipo = QComboBox()
         self.combo_tipo.addItems(["Insumo", "Producto terminado"])
+        self.combo_tipo.currentTextChanged.connect(self._actualizar_codigo_sugerido)
         self.entrada_unidad = QLineEdit()
         self.entrada_unidad.setPlaceholderText("kg, L, g, unidad...")
         self.entrada_precio = QLineEdit("0")
         self.entrada_stock_minimo = QLineEdit("0")
 
         filas = [
-            ("Código único *", self.entrada_codigo, True),
+            ("Código único", self.entrada_codigo, False),
             ("Nombre del producto *", self.entrada_nombre, True),
             ("Tipo de producto", self.combo_tipo, False),
             ("Unidad de medida", self.entrada_unidad, False),
@@ -394,7 +392,7 @@ class VentanaProducto(QDialog):
             secl.addWidget(lbl_campo, i, 0)
             secl.addWidget(widget, i, 1)
 
-        lbl_nota = QLabel("* Campo obligatorio")
+        lbl_nota = QLabel("* Campo obligatorio  ·  el código se genera automáticamente según el tipo")
         lbl_nota.setStyleSheet(f"color: {COLOR_TEXTO_SECUNDARIO};")
         lbl_nota.setFont(fuente(8, cursiva=True))
         cuerpo.addWidget(lbl_nota)
@@ -412,12 +410,16 @@ class VentanaProducto(QDialog):
         cuerpo.addLayout(fila_btn)
 
         centrar_ventana(self, 480, 420)
+        self._actualizar_codigo_sugerido()
+
+    def _actualizar_codigo_sugerido(self):
+        with nueva_sesion() as db:
+            self.entrada_codigo.setText(siguiente_codigo(db, self.combo_tipo.currentText()))
 
     def _guardar(self):
-        codigo = self.entrada_codigo.text().strip()
         nombre = self.entrada_nombre.text().strip()
-        if not codigo or not nombre:
-            self._msg.mostrar("El código y el nombre son obligatorios.", "error")
+        if not nombre:
+            self._msg.mostrar("El nombre es obligatorio.", "error")
             return
         try:
             precio = float(self.entrada_precio.text() or 0)
@@ -427,11 +429,13 @@ class VentanaProducto(QDialog):
             return
 
         with nueva_sesion() as db:
-            if db.query(Producto).filter_by(codigo=codigo).first():
-                self._msg.mostrar(
-                    "Ya existe un producto con ese código en el catálogo. "
-                    "Usa un código diferente.", "error", 0)
-                return
+            # Se regenera el código aquí mismo, en vez de confiar en el
+            # que se muestra en el campo (solo lectura, calculado al
+            # abrir el diálogo o al cambiar el tipo): si alguien más
+            # registró un producto del mismo tipo mientras este diálogo
+            # estaba abierto, el código sugerido podría haber quedado
+            # desactualizado. Así nunca puede chocar con uno existente.
+            codigo = siguiente_codigo(db, self.combo_tipo.currentText())
             db.add(Producto(
                 codigo=codigo, nombre=nombre, tipo=self.combo_tipo.currentText(),
                 unidad_medida=self.entrada_unidad.text().strip(),

@@ -56,14 +56,20 @@ DEFINICION_MODULOS = [
 
 # Título y breadcrumb mostrados en el header superior por cada módulo.
 _TITULOS_MODULO = {
-    "dashboard":            ("Inicio", ["Inicio"]),
-    "compras":              ("Compras", ["Operación", "Compras"]),
-    "inventario":           ("Inventario", ["Operación", "Inventario"]),
-    "produccion":           ("Producción", ["Operación", "Producción"]),
-    "ventas":               ("Realizar ventas", ["Operación", "Realizar ventas"]),
-    "costos":               ("Reportes de ventas", ["Análisis", "Reportes de ventas"]),
-    "centro_inteligencia":  ("Centro de Inteligencia", ["Inteligencia", "Centro de Inteligencia"]),
-    "admin":                ("Administración", ["Administración"]),
+    # El segundo elemento de cada tupla es la migaja de pan (breadcrumb)
+    # bajo el título. Antes repetía literalmente el nombre del módulo
+    # ("Inicio" bajo "Inicio", "Compras" bajo "Compras"), lo cual un
+    # tester marcó como redundante y poco informativo sobre qué se
+    # hace en cada módulo. Ahora el último segmento nombra la operación
+    # principal de ese módulo en vez de repetir su nombre.
+    "dashboard":            ("Inicio", ["Centro de operaciones"]),
+    "compras":              ("Compras", ["Operación", "Órdenes de compra"]),
+    "inventario":           ("Inventario", ["Operación", "Stock y lotes"]),
+    "produccion":           ("Producción", ["Operación", "Órdenes de producción"]),
+    "ventas":               ("Realizar ventas", ["Operación", "Órdenes de venta"]),
+    "costos":               ("Reportes de ventas", ["Análisis", "Costos y márgenes"]),
+    "centro_inteligencia":  ("Centro de Inteligencia", ["Inteligencia", "Recomendaciones y predicciones"]),
+    "admin":                ("Administración", ["Administración", "Datos de la empresa y usuarios"]),
 }
 
 # A qué módulo/tabla/tabla-interna navegar cuando se elige un resultado

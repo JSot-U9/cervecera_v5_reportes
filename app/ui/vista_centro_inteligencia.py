@@ -134,7 +134,11 @@ class VistaCentroInteligencia(QWidget):
 
         intro = QLabel(
             "Cantidad a reponer = Demanda esperada del periodo + Stock de seguridad − Stock disponible.\n"
-            "La recomendación NO genera una compra automáticamente: elige un insumo y confirma."
+            "La recomendación NO genera una compra automáticamente: elige un insumo y confirma.\n"
+            "Un insumo con demanda esperada en 0 no es un error: significa que todavía no tiene "
+            "historial de consumo ni está en ninguna receta activa con ventas suficientes para "
+            "proyectarlo (por ejemplo, un insumo recién creado, o material de empaque que no se "
+            "modela dentro de ninguna receta). Haz clic en la fila para ver el motivo exacto."
         )
         intro.setStyleSheet(f"color: {COLOR_TEXTO_SECUNDARIO};")
         intro.setFont(fuente(9, cursiva=True))
@@ -197,7 +201,7 @@ class VistaCentroInteligencia(QWidget):
             self, lambda: motor_reposicion.calcular_recomendaciones(horizonte_dias=horizonte),
             al_terminar=self._al_terminar_reposicion,
             mensaje="🧠  Calculando reposición inteligente...",
-            submensaje="Analizando stock, demanda esperada y consumo histórico...",
+            submensaje="Analizando stock, demanda y consumo histórico...",
         )
 
     def _al_terminar_reposicion(self, recomendaciones, error):

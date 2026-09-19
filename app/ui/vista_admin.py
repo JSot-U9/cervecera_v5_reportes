@@ -19,7 +19,9 @@ from app.ui.widgets import (
     EncabezadoModulo, BarraBusqueda, TablaDatos, SeccionFormulario, MensajeEstado,
     centrar_ventana, confirmar,
 )
-from app.ui.estilos import COLOR_TEXTO_SECUNDARIO, COLOR_PRIMARIO, fuente, poner_clase, fondo
+from app.ui.estilos import (
+    COLOR_TEXTO_SECUNDARIO, COLOR_PRIMARIO, COLOR_SIDEBAR, COLOR_TEXTO, fuente, poner_clase, fondo,
+)
 
 ROLES_DISPONIBLES = ["ADMIN", "COMPRAS", "INVENTARIO", "PRODUCCION", "VENTAS", "COSTOS"]
 
@@ -116,12 +118,55 @@ class VistaAdmin(QWidget):
         pl.addWidget(lbl_nota)
         pl.addSpacing(4)
 
-        btn_guardar = QPushButton("💾  Guardar datos de la empresa")
-        btn_guardar.clicked.connect(self._guardar_empresa)
-        pl.addWidget(btn_guardar, alignment=Qt.AlignLeft)
+        # Sección "ADMINISTRACIÓN" del reporte de bugs: los campos se
+        # podían editar directamente, sin ningún aviso ni confirmación
+        # — un descuido de teclado bastaba para cambiar el nombre de la
+        # empresa que sale en TODOS los reportes. Ahora arrancan
+        # bloqueados (solo lectura) y hace falta pulsar "Editar" a
+        # propósito para poder modificarlos.
+        fila_botones = QHBoxLayout()
+        self.btn_editar_empresa = QPushButton("✏  Editar datos")
+        poner_clase(self.btn_editar_empresa, "secundario")
+        self.btn_editar_empresa.clicked.connect(self._activar_edicion_empresa)
+        fila_botones.addWidget(self.btn_editar_empresa)
+
+        self.btn_cancelar_empresa = QPushButton("Cancelar")
+        poner_clase(self.btn_cancelar_empresa, "secundario")
+        self.btn_cancelar_empresa.clicked.connect(self._cancelar_edicion_empresa)
+        self.btn_cancelar_empresa.setVisible(False)
+        fila_botones.addWidget(self.btn_cancelar_empresa)
+
+        self.btn_guardar_empresa = QPushButton("💾  Guardar datos de la empresa")
+        self.btn_guardar_empresa.clicked.connect(self._guardar_empresa)
+        self.btn_guardar_empresa.setVisible(False)
+        fila_botones.addWidget(self.btn_guardar_empresa)
+        fila_botones.addStretch()
+        pl.addLayout(fila_botones)
         pl.addStretch()
 
+        self._bloquear_campos_empresa(True)
         self._cargar_datos_empresa()
+
+    def _bloquear_campos_empresa(self, bloqueado: bool):
+        for entrada in self._entradas_empresa.values():
+            entrada.setReadOnly(bloqueado)
+            entrada.setStyleSheet(
+                f"background-color: {COLOR_SIDEBAR if bloqueado else 'white'}; "
+                f"color: {COLOR_TEXTO_SECUNDARIO if bloqueado else COLOR_TEXTO};"
+            )
+        self.btn_editar_empresa.setVisible(bloqueado)
+        self.btn_cancelar_empresa.setVisible(not bloqueado)
+        self.btn_guardar_empresa.setVisible(not bloqueado)
+
+    def _activar_edicion_empresa(self):
+        self._bloquear_campos_empresa(False)
+        self._msg_empresa.mostrar(
+            "Modo edición activado — recuerda guardar los cambios.", "info", 4000)
+
+    def _cancelar_edicion_empresa(self):
+        self._cargar_datos_empresa()
+        self._bloquear_campos_empresa(True)
+        self._msg_empresa.mostrar("Edición cancelada — no se guardó ningún cambio.", "info", 3000)
 
     def _cargar_datos_empresa(self):
         emp = obtener_datos_empresa()
@@ -138,6 +183,7 @@ class VistaAdmin(QWidget):
             direccion=vals["empresa_direccion"], telefono=vals["empresa_telefono"],
             email=vals["empresa_email"], ciudad=vals["empresa_ciudad"], web=vals["empresa_web"],
         )
+        self._bloquear_campos_empresa(True)
         self._msg_empresa.mostrar(
             "Datos de la empresa guardados. El nuevo encabezado aparecerá en el próximo reporte.",
             "exito")

@@ -353,6 +353,20 @@ class VentanaNuevaOrden(QDialog):
         self.combo_proveedor.setCurrentIndex(-1)
         self.combo_proveedor.currentIndexChanged.connect(self._al_cambiar_proveedor)
         spl.addWidget(self.combo_proveedor)
+        # Sección "COMPRAS" del reporte de bugs: un tester se encontró
+        # con que solo puede elegir un proveedor por orden y no supo si
+        # era un límite del sistema o algo que se le escapaba. Es a
+        # propósito — así funciona una orden de compra en cualquier
+        # ERP — así que se aclara aquí mismo en vez de dejarlo a que
+        # cada usuario lo intuya por su cuenta.
+        lbl_nota_proveedor = QLabel(
+            "ℹ Cada orden es a UN solo proveedor (así se documenta correctamente qué le "
+            "compraste a quién). Si necesitas productos de varios proveedores, crea una "
+            "orden nueva por cada uno.")
+        lbl_nota_proveedor.setStyleSheet(f"color: {COLOR_TEXTO_SECUNDARIO};")
+        lbl_nota_proveedor.setFont(fuente(8, cursiva=True))
+        lbl_nota_proveedor.setWordWrap(True)
+        spl.addWidget(lbl_nota_proveedor)
 
         # ── Agregar producto ────────────────────────────────────
         sec_prod = SeccionFormulario("Agregar producto a la orden")
@@ -432,11 +446,25 @@ class VentanaNuevaOrden(QDialog):
 
         self.tabla_items = TablaDatos(
             ["Producto", "Cantidad", "Precio Unit. (S/)", "Vence", "Subtotal (S/)"],
-            con_id=False,
+            con_id=False, permitir_orden=False,
             anchos={"Producto": 180, "Cantidad": 80, "Precio Unit. (S/)": 120,
                     "Vence": 110, "Subtotal (S/)": 110},
         )
         stl.addWidget(self.tabla_items, stretch=1)
+
+        # Sección A / OTROS del reporte de bugs: no había forma de
+        # quitar un producto ya agregado a la orden — si el usuario se
+        # equivocaba, tenía que cerrar el formulario y empezar de cero.
+        fila_quitar = QHBoxLayout()
+        fila_quitar.addStretch()
+        self.btn_quitar_item = QPushButton("🗑  Quitar producto seleccionado")
+        poner_clase(self.btn_quitar_item, "secundario")
+        self.btn_quitar_item.setEnabled(False)
+        self.btn_quitar_item.clicked.connect(self._quitar_item)
+        fila_quitar.addWidget(self.btn_quitar_item)
+        stl.addLayout(fila_quitar)
+        self.tabla_items.itemSelectionChanged.connect(
+            lambda: self.btn_quitar_item.setEnabled(self.tabla_items.currentRow() >= 0))
 
         # ── Botones finales ───────────────────────────────────
         fila_btn = QHBoxLayout()
@@ -571,6 +599,15 @@ class VentanaNuevaOrden(QDialog):
                 ])
         self.tabla_items.cargar_filas(filas)
         self.lbl_total.setText(f"Total: S/ {total:,.2f}")
+
+    def _quitar_item(self):
+        fila = self.tabla_items.currentRow()
+        if fila < 0 or fila >= len(self.items_agregados):
+            return
+        del self.items_agregados[fila]
+        self._msg.mostrar("Producto quitado de la orden.", "info", 2000)
+        self._refrescar_tabla_items()
+        self.btn_quitar_item.setEnabled(False)
 
     def _guardar_orden(self):
         proveedor_id = self.combo_proveedor.currentData()

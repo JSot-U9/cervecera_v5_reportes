@@ -93,12 +93,19 @@ class HeaderSuperior(QFrame):
         self._temporizador_busqueda.timeout.connect(self._ejecutar_busqueda)
 
         # ── Notificaciones ───────────────────────────────────────────
-        self.btn_notificaciones = QPushButton("🔔")
+        # Antes el botón mostraba solo el emoji 🔔. Un tester probó el
+        # sistema en una máquina sin fuente de emojis en color y el
+        # glifo se dibujaba como un recuadro roto/ilegible — ni
+        # siquiera se notaba que era un botón de notificaciones (creía
+        # que era el botón para ir a Inicio). Un texto simple ("Alertas")
+        # se ve igual en cualquier sistema, sin depender de qué fuentes
+        # de emoji estén instaladas.
+        self.btn_notificaciones = QPushButton("Alertas")
         poner_clase(self.btn_notificaciones, "secundario")
-        # Antes: setFixedWidth(44). Con el padding del QSS, "🔔 137"
-        # necesita ~74 px, así que Qt recortaba el texto y el usuario
-        # leía "13" donde el sistema quería decir 137. Ahora el botón
-        # crece con su contenido y el número nunca queda cortado.
+        # Antes: setFixedWidth(44). Con el padding del QSS, "Alertas 137"
+        # necesita más ancho, así que Qt recortaba el texto y el usuario
+        # leía un número incompleto. Ahora el botón crece con su
+        # contenido y el número nunca queda cortado.
         self.btn_notificaciones.setMinimumWidth(44)
         self.btn_notificaciones.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Fixed)
         self.btn_notificaciones.setToolTip("Alertas pendientes")
@@ -118,10 +125,11 @@ class HeaderSuperior(QFrame):
         col_usuario.addWidget(self._lbl_rol)
         layout.addLayout(col_usuario)
 
-        lbl_avatar = QLabel("👤")
-        lbl_avatar.setFont(fuente(17))
-        lbl_avatar.setStyleSheet("background: transparent;")
-        layout.addWidget(lbl_avatar)
+        # Antes había un emoji "👤" decorativo aquí. Es del mismo tipo
+        # de glifo que falló con la campanita en sistemas sin fuente de
+        # emoji — como es puramente decorativo (el nombre y el rol ya
+        # identifican al usuario en el texto de al lado), se quita en
+        # vez de arriesgarse a que también se vea roto.
 
     # ── API pública ──────────────────────────────────────────────────
     def establecer_titulo(self, titulo: str, migas: list = None):
@@ -135,14 +143,14 @@ class HeaderSuperior(QFrame):
     def establecer_notificaciones(self, cantidad: int):
         cantidad = max(0, int(cantidad or 0))
         if not cantidad:
-            self.btn_notificaciones.setText("🔔")
+            self.btn_notificaciones.setText("Alertas")
             self.btn_notificaciones.setToolTip("No hay asuntos pendientes")
         else:
             # Por encima de 99 se muestra "99+" para que el botón no
             # empuje al resto del header, pero el número exacto queda
             # siempre disponible en el tooltip.
             etiqueta = str(cantidad) if cantidad <= 99 else "99+"
-            self.btn_notificaciones.setText(f"🔔 {etiqueta}")
+            self.btn_notificaciones.setText(f"Alertas ({etiqueta})")
             self.btn_notificaciones.setToolTip(
                 f"{cantidad} asunto(s) requieren tu atención — clic para verlos en Inicio"
             )

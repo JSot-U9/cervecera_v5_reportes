@@ -10,10 +10,13 @@ from PySide6.QtWidgets import (
 )
 
 from app.basedatos import nueva_sesion
-from app.modelos import Producto
+from app.modelos import Producto, Cliente
 from app.sesion import sesion_actual
 from app.seguridad import puede, modulos_visibles
-from app.logica_ventas import registrar_venta, listar_ordenes_venta, listar_clientes_activos, crear_cliente
+from app.logica_ventas import (
+    registrar_venta, listar_ordenes_venta, listar_clientes_activos, crear_cliente,
+    actualizar_cliente,
+)
 from app.logica_inventario import StockInsuficiente
 from app.ui.widgets import (
     EncabezadoModulo, BarraBusqueda, TablaDatos, SeccionFormulario, MensajeEstado,
@@ -81,6 +84,7 @@ class VistaVentas(QWidget):
                                placeholder="🔎  Buscar cliente...")
         if puede_crear:
             barra.agregar_boton("＋  Nuevo cliente", self._abrir_nuevo_cliente)
+            barra.agregar_boton("✏  Editar", self._abrir_editar_cliente, estilo="accionSecundaria")
         pl.addWidget(barra)
 
         self.tabla_clientes = TablaDatos(
@@ -122,6 +126,22 @@ class VistaVentas(QWidget):
     def _abrir_nuevo_cliente(self):
         VentanaCliente(self.window(), al_guardar=self.refrescar).exec()
 
+    def _abrir_editar_cliente(self):
+        cliente_id = self.tabla_clientes.id_seleccionado()
+        if not cliente_id:
+            QMessageBox.warning(self, "Aviso", "Selecciona un cliente de la lista primero.")
+            return
+        with nueva_sesion() as db:
+            c = db.get(Cliente, cliente_id)
+            if c is None:
+                QMessageBox.warning(self, "Aviso", "Ese cliente ya no existe.")
+                return
+            datos = {"tipo": c.tipo, "nombre": c.nombre, "documento": c.documento or "",
+                     "telefono": c.telefono or "", "email": c.email or ""}
+        dlg = VentanaCliente(self.window(), al_guardar=self.refrescar,
+                              cliente_id=cliente_id, datos=datos)
+        dlg.exec()
+
     def _abrir_dialogo_reporte(self):
         from app.ui.dialogo_reporte import DialogoReporte
         dlg = DialogoReporte(self.window(), modulo="ventas")
@@ -147,15 +167,19 @@ def _franja(titulo_texto: str, subtitulo: str = None) -> QWidget:
 
 
 class VentanaCliente(QDialog):
-    def __init__(self, parent, al_guardar):
+    def __init__(self, parent, al_guardar, cliente_id=None, datos=None):
         super().__init__(parent)
-        self.setWindowTitle("Nuevo cliente")
+        self.setWindowTitle("Editar cliente" if cliente_id else "Nuevo cliente")
         self.al_guardar = al_guardar
+        self.cliente_id = cliente_id
+        datos = datos or {}
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
-        layout.addWidget(_franja("＋  Registrar nuevo cliente"))
+        icono = "✏" if cliente_id else "＋"
+        titulo = "Editar cliente" if cliente_id else "Registrar nuevo cliente"
+        layout.addWidget(_franja(f"{icono}  {titulo}"))
 
         cuerpo = QVBoxLayout()
         cuerpo.setContentsMargins(20, 16, 20, 16)
@@ -171,10 +195,12 @@ class VentanaCliente(QDialog):
 
         self.combo_tipo = QComboBox()
         self.combo_tipo.addItems(["NATURAL", "JURIDICA"])
-        self.entrada_nombre = QLineEdit()
-        self.entrada_documento = QLineEdit()
-        self.entrada_telefono = QLineEdit()
-        self.entrada_email = QLineEdit()
+        if datos.get("tipo") in ("NATURAL", "JURIDICA"):
+            self.combo_tipo.setCurrentText(datos["tipo"])
+        self.entrada_nombre = QLineEdit(datos.get("nombre", ""))
+        self.entrada_documento = QLineEdit(datos.get("documento", ""))
+        self.entrada_telefono = QLineEdit(datos.get("telefono", ""))
+        self.entrada_email = QLineEdit(datos.get("email", ""))
 
         campos = [
             ("Tipo de persona", self.combo_tipo, False),
@@ -201,7 +227,7 @@ class VentanaCliente(QDialog):
         poner_clase(btn_cancelar, "secundario")
         btn_cancelar.clicked.connect(self.reject)
         fila_btn.addWidget(btn_cancelar)
-        btn_guardar = QPushButton("💾  Registrar cliente")
+        btn_guardar = QPushButton("💾  Guardar cliente")
         btn_guardar.clicked.connect(self._guardar)
         fila_btn.addWidget(btn_guardar)
         cuerpo.addLayout(fila_btn)
@@ -213,15 +239,19 @@ class VentanaCliente(QDialog):
         if not nombre:
             self._msg.mostrar("El nombre del cliente es obligatorio.", "error")
             return
+        datos = dict(
+            tipo=self.combo_tipo.currentText(), nombre=nombre,
+            documento=self.entrada_documento.text().strip(),
+            telefono=self.entrada_telefono.text().strip(),
+            email=self.entrada_email.text().strip(),
+        )
         try:
-            crear_cliente(
-                tipo=self.combo_tipo.currentText(), nombre=nombre,
-                documento=self.entrada_documento.text().strip(),
-                telefono=self.entrada_telefono.text().strip(),
-                email=self.entrada_email.text().strip(),
-            )
+            if self.cliente_id:
+                actualizar_cliente(self.cliente_id, **datos)
+            else:
+                crear_cliente(**datos)
         except Exception as error:
-            self._msg.mostrar(f"No se pudo registrar el cliente: {error}", "error", 0)
+            self._msg.mostrar(f"No se pudo guardar el cliente: {error}", "error", 0)
             return
         self.al_guardar()
         self.accept()
@@ -327,9 +357,24 @@ class VentanaNuevaVenta(QDialog):
 
         self.tabla_items = TablaDatos(
             ["Producto", "Cantidad", "Precio Unit. (S/)", "Subtotal (S/)"], con_id=False,
+            permitir_orden=False,
             anchos={"Producto": 200, "Cantidad": 80, "Precio Unit. (S/)": 130, "Subtotal (S/)": 120},
         )
         scarl.addWidget(self.tabla_items, stretch=1)
+
+        # Sección D / OTROS del reporte de bugs: no había forma de
+        # quitar un producto ya agregado al carrito antes de registrar
+        # la venta.
+        fila_quitar = QHBoxLayout()
+        fila_quitar.addStretch()
+        self.btn_quitar_item = QPushButton("🗑  Quitar producto seleccionado")
+        poner_clase(self.btn_quitar_item, "secundario")
+        self.btn_quitar_item.setEnabled(False)
+        self.btn_quitar_item.clicked.connect(self._quitar_item)
+        fila_quitar.addWidget(self.btn_quitar_item)
+        scarl.addLayout(fila_quitar)
+        self.tabla_items.itemSelectionChanged.connect(
+            lambda: self.btn_quitar_item.setEnabled(self.tabla_items.currentRow() >= 0))
 
         fila_btn = QHBoxLayout()
         lbl_oblig = QLabel("* Campos obligatorios")
@@ -397,6 +442,15 @@ class VentanaNuevaVenta(QDialog):
                 ])
         self.tabla_items.cargar_filas(filas)
         self.lbl_total.setText(f"TOTAL:  S/ {total:,.2f}")
+
+    def _quitar_item(self):
+        fila = self.tabla_items.currentRow()
+        if fila < 0 or fila >= len(self.items_agregados):
+            return
+        del self.items_agregados[fila]
+        self._msg.mostrar("Producto quitado del carrito.", "info", 2000)
+        self._refrescar_tabla_items()
+        self.btn_quitar_item.setEnabled(False)
 
     def _guardar_venta(self):
         cliente_id = self.combo_cliente.currentData()

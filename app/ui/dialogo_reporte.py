@@ -19,7 +19,10 @@ from PySide6.QtWidgets import (
 )
 
 from app.logica_reportes import REPORTES, NOMBRES_LEGIBLES, guardar_pdf, guardar_xlsx, guardar_csv
-from app.ui.estilos import COLOR_PRIMARIO, COLOR_SIDEBAR, COLOR_TEXTO, COLOR_TEXTO_SECUNDARIO, fuente, fondo
+from app.ui.estilos import (
+    COLOR_PRIMARIO, COLOR_PRIMARIO_CLARO, COLOR_SIDEBAR, COLOR_TEXTO,
+    COLOR_TEXTO_SECUNDARIO, _COLOR_SEPARADOR, fuente, fondo,
+)
 from app.ui.widgets import TablaDatos, centrar_ventana
 
 _FORMATOS = {
@@ -109,6 +112,26 @@ class DialogoReporte(QDialog):
         self._radios_formato = {}
         for i, texto in enumerate(_FORMATOS):
             radio = QRadioButton(texto)
+            # Antes eran QRadioButton "pelados": con el indicador nativo
+            # (un círculo chico) como única pista de que eran opciones
+            # clickeables, un tester los confundió con simples etiquetas
+            # de texto — aunque hacer clic SÍ funcionaba, no se notaba.
+            # Ahora cada formato se ve como una "píldora" con borde que
+            # se resalta con el color primario cuando está seleccionada,
+            # y el cursor cambia a mano al pasar por encima.
+            radio.setObjectName(f"radioFormato_{i}")
+            radio.setCursor(Qt.PointingHandCursor)
+            radio.setStyleSheet(f"""
+                QRadioButton#radioFormato_{i} {{
+                    padding: 5px 12px; border-radius: 12px;
+                    border: 1.5px solid {_COLOR_SEPARADOR}; background-color: white;
+                }}
+                QRadioButton#radioFormato_{i}::indicator {{ width: 12px; height: 12px; }}
+                QRadioButton#radioFormato_{i}:checked {{
+                    border: 1.5px solid {COLOR_PRIMARIO}; background-color: {COLOR_PRIMARIO_CLARO};
+                    font-weight: bold;
+                }}
+            """)
             if i == 0:
                 radio.setChecked(True)
             self._grupo_formato.addButton(radio)
@@ -162,6 +185,7 @@ class DialogoReporte(QDialog):
 
     def _cargar_preview(self):
         clave = self._clave_tipo()
+        ya_habia_datos = self._datos is not None
         self._lbl_estado.setText("Cargando datos del reporte…")
 
         try:
@@ -182,9 +206,18 @@ class DialogoReporte(QDialog):
 
         n = len(self._datos["filas"])
         nombre = NOMBRES_LEGIBLES[clave]
+        # Cuando el diálogo se abre desde un módulo concreto, la
+        # primera vista previa se carga sola (ver __init__) — así que
+        # al usuario clásico, pulsar "Vista previa" no cambiaba nada
+        # visible en pantalla y parecía un botón muerto. Ahora, si ya
+        # había una vista previa cargada, el mensaje deja explícito que
+        # SÍ se volvió a consultar la base de datos, y el botón mismo
+        # pasa a decir "Actualizar" para que quede claro qué hace.
+        prefijo = "✓ Datos actualizados — " if ya_habia_datos else ""
         self._lbl_estado.setText(
-            f"Vista previa de «{nombre}» — {n} registro{'s' if n != 1 else ''} "
+            f"{prefijo}Vista previa de «{nombre}» — {n} registro{'s' if n != 1 else ''} "
             f"encontrado{'s' if n != 1 else ''}.")
+        self.btn_vista_previa.setText("🔄  Actualizar vista previa")
         self.btn_guardar.setEnabled(True)
         self._mostrar_tabla()
 

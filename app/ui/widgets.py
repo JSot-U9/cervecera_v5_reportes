@@ -16,6 +16,8 @@ Componentes:
   - BarraEstado          : barra inferior con usuario/rol
 """
 
+import re
+
 from PySide6.QtCore import Qt, QTimer, QThread, Signal
 from PySide6.QtGui import QScreen
 from PySide6.QtWidgets import (
@@ -190,6 +192,39 @@ _TAG_COLORES = {
 }
 
 
+class _CeldaOrdenable(QTableWidgetItem):
+    """QTableWidgetItem que ordena por su valor NUMÉRICO cuando el
+    texto lo contiene, aunque venga formateado ("S/ 1,234.50",
+    "83.19 %", "🟢 Disponible", "50.0"). Si no hay número, ordena por
+    texto sin distinguir mayúsculas.
+
+    Por qué hace falta: QTableWidgetItem por defecto compara el texto
+    tal cual, así que una columna de cantidades ordenaría "10" antes
+    que "9" (comparación alfabética, no numérica) — justo lo que un
+    tester reportó como "las tablas no se pueden ordenar de ninguna
+    manera [de forma útil]".
+    """
+
+    _RE_NUMERO = re.compile(r"-?\d[\d,]*\.?\d*")
+
+    def __lt__(self, otro):
+        propio = self._valor_numerico(self.text())
+        ajeno = self._valor_numerico(otro.text()) if isinstance(otro, QTableWidgetItem) else None
+        if propio is not None and ajeno is not None:
+            return propio < ajeno
+        return self.text().lower() < otro.text().lower()
+
+    @classmethod
+    def _valor_numerico(cls, texto: str):
+        m = cls._RE_NUMERO.search(texto)
+        if not m:
+            return None
+        try:
+            return float(m.group().replace(",", ""))
+        except ValueError:
+            return None
+
+
 class TablaDatos(QTableWidget):
     """
     QTableWidget con filas alternas, tags de color por fila y filtro
@@ -204,7 +239,8 @@ class TablaDatos(QTableWidget):
     dobleClicFila = Signal(object)
 
     def __init__(self, columnas: list, con_id: bool = True,
-                 al_doble_clic=None, anchos: dict = None, parent=None):
+                 al_doble_clic=None, anchos: dict = None, parent=None,
+                 permitir_orden: bool = True):
         super().__init__(parent)
         self._con_id = con_id
         self._al_doble_clic = al_doble_clic
@@ -220,6 +256,24 @@ class TablaDatos(QTableWidget):
         self.verticalHeader().setVisible(False)
         self.setShowGrid(True)
         self.horizontalHeader().setStretchLastSection(True)
+        # Sección "OTROS" del reporte de bugs: ninguna tabla se podía
+        # ordenar haciendo clic en un encabezado. setSortingEnabled(True)
+        # ya le da a QTableWidget el clic-para-ordenar de forma nativa;
+        # lo que hacía falta era la comparación numérica de _CeldaOrdenable
+        # (ver arriba) para que columnas de cantidades/precios ordenen
+        # como números y no como texto.
+        #
+        # permitir_orden=False es para las tablas chicas "en
+        # construcción" (el carrito de una orden de compra/venta
+        # todavía sin guardar): ahí la posición de cada fila tiene que
+        # coincidir con una lista interna en el mismo orden (para poder
+        # quitar el ítem correcto), y con pocas filas ordenar no aporta
+        # nada — así que se desactiva para no arriesgar esa correspondencia.
+        self._permitir_orden = permitir_orden
+        self.setSortingEnabled(permitir_orden)
+        if permitir_orden:
+            self.horizontalHeader().setSortIndicatorShown(True)
+            self.horizontalHeader().setCursor(Qt.PointingHandCursor)
 
         for i, col in enumerate(columnas):
             ancho = (anchos or {}).get(col, 130)
@@ -271,29 +325,29 @@ class TablaDatos(QTableWidget):
         return False
 
     def _pintar_resaltado(self, fila: int):
-        colores_originales = []
+        # Se guardan los ITEMS mismos (no el índice de fila): si el
+        # usuario ordena la tabla haciendo clic en un encabezado
+        # después de resaltar una fila, Qt reordena la POSICIÓN visual
+        # pero los objetos QTableWidgetItem siguen siendo los mismos —
+        # así limpiar_resaltado() siempre restaura los colores en la
+        # celda correcta, esté donde esté ahora.
+        items_originales = []
         for col in range(self.columnCount()):
             item = self.item(fila, col)
             if item is None:
-                colores_originales.append(None)
                 continue
-            colores_originales.append((item.background(), item.foreground()))
+            items_originales.append((item, item.background(), item.foreground()))
             item.setBackground(QColor(self.COLOR_RESALTADO))
             item.setForeground(QColor(self.COLOR_RESALTADO_TEXTO))
-        self._fila_resaltada = (fila, colores_originales)
+        self._fila_resaltada = items_originales
 
     def limpiar_resaltado(self):
-        datos = getattr(self, "_fila_resaltada", None)
-        if not datos:
+        items_originales = getattr(self, "_fila_resaltada", None)
+        if not items_originales:
             return
-        fila, colores_originales = datos
-        if fila < self.rowCount():
-            for col, original in enumerate(colores_originales):
-                item = self.item(fila, col)
-                if item is None or original is None:
-                    continue
-                item.setBackground(original[0])
-                item.setForeground(original[1])
+        for item, bg, fg in items_originales:
+            item.setBackground(bg)
+            item.setForeground(fg)
         self._fila_resaltada = None
 
     def _repintar(self, filas, tags_por_fila):
@@ -301,6 +355,12 @@ class TablaDatos(QTableWidget):
         # resaltado anterior deja de existir: se olvida la referencia
         # para no intentar restaurar colores de items ya destruidos.
         self._fila_resaltada = None
+        # Con sorting activo, cada setItem() dispara un reordenamiento
+        # automático — durante el llenado eso puede mezclar columnas de
+        # distintas filas (la fila i todavía no tiene todas sus celdas
+        # cuando ya se movió de posición). Se desactiva mientras se
+        # llena y se reactiva al final.
+        self.setSortingEnabled(False)
         self.setRowCount(0)
         self.setRowCount(len(filas))
         for i, fila in enumerate(filas):
@@ -309,13 +369,14 @@ class TablaDatos(QTableWidget):
                    else ("par" if i % 2 == 1 else "normal"))
             bg, fg = _TAG_COLORES.get(tag, (None, None))
             for c, valor in enumerate(valores):
-                item = QTableWidgetItem(str(valor))
+                item = _CeldaOrdenable(str(valor))
                 if c == 0 and self._con_id:
                     item.setData(Qt.UserRole, fila[0])
                 if bg:
                     item.setBackground(QColor(bg))
                     item.setForeground(QColor(fg))
                 self.setItem(i, c, item)
+        self.setSortingEnabled(self._permitir_orden)
 
     def filtrar(self, texto: str):
         texto = (texto or "").lower().strip()

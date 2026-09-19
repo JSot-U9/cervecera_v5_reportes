@@ -14,6 +14,42 @@ from datetime import date, timedelta
 
 from app.modelos import LoteInventario, MovimientoInventario, Producto
 
+_PREFIJO_CODIGO = {"Insumo": "INS", "Producto terminado": "PRD"}
+
+
+def siguiente_codigo(db, tipo: str) -> str:
+    """Código único que le correspondería al PRÓXIMO producto de este
+    tipo, con el mismo formato que ya usa el catálogo (INS-001,
+    PRD-001, ...) — cada tipo lleva su propia numeración.
+
+    Antes el código era un campo de texto libre que el usuario debía
+    inventar a mano (con el placeholder "Ej: INS-014" solo como
+    sugerencia visual), así que nada impedía que alguien usara un
+    formato distinto al del resto del catálogo. Ahora se autogenera a
+    partir del tipo elegido, igual que ya funciona el resto de la
+    numeración del sistema (OC-, V-, etc.).
+    """
+    prefijo = _PREFIJO_CODIGO.get(tipo, "PRD")
+    ultimo = (
+        db.query(Producto)
+        .filter(Producto.codigo.like(f"{prefijo}-%"))
+        .order_by(Producto.codigo.desc())
+        .first()
+    )
+    siguiente_numero = 1
+    if ultimo is not None:
+        sufijo = ultimo.codigo.split("-")[-1]
+        if sufijo.isdigit():
+            siguiente_numero = int(sufijo) + 1
+    codigo = f"{prefijo}-{siguiente_numero:03d}"
+    # Por si algún código antiguo no siguió la numeración secuencial
+    # (importado manualmente, etc.), se sigue avanzando hasta
+    # encontrar uno que de verdad esté libre.
+    while db.query(Producto).filter_by(codigo=codigo).first() is not None:
+        siguiente_numero += 1
+        codigo = f"{prefijo}-{siguiente_numero:03d}"
+    return codigo
+
 
 class StockInsuficiente(Exception):
     """Se lanza cuando se pide sacar más cantidad de la que hay disponible."""

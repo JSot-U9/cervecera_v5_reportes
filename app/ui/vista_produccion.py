@@ -20,7 +20,7 @@ from app.logica_produccion import (
 )
 from app.ui.widgets import (
     EncabezadoModulo, BarraBusqueda, TablaDatos, SeccionFormulario, MensajeEstado,
-    centrar_ventana, formatear_estado,
+    centrar_ventana, formatear_estado, BotonAyuda,
 )
 from app.ui.estilos import COLOR_TEXTO_SECUNDARIO, COLOR_PRIMARIO, fuente, poner_clase, fondo
 
@@ -77,12 +77,7 @@ class VistaProduccion(QWidget):
             barra.agregar_boton(
                 "🧠  Merma esperada", lambda: self._ir_a_inteligencia(),
                 estilo="accionSecundaria")
-        btn_ayuda = QPushButton("❓")
-        btn_ayuda.setFixedWidth(30)
-        poner_clase(btn_ayuda, "secundario")
-        btn_ayuda.clicked.connect(
-            lambda: QMessageBox.information(self, "¿Cómo funciona una orden de producción?",
-                                             _TEXTO_PRODUCCION))
+        btn_ayuda = BotonAyuda("¿Cómo funciona una orden de producción?", _TEXTO_PRODUCCION)
         barra._botones_layout.addWidget(btn_ayuda)
         cuerpo.addWidget(barra)
 
@@ -210,11 +205,7 @@ class VentanaNuevaOrdenProduccion(QDialog):
         lbl_receta.setFont(fuente(9, negrita=True))
         fila_receta.addWidget(lbl_receta)
         fila_receta.addStretch()
-        btn_ayuda = QPushButton("❓")
-        btn_ayuda.setFixedWidth(30)
-        poner_clase(btn_ayuda, "secundario")
-        btn_ayuda.clicked.connect(
-            lambda: QMessageBox.information(self, "¿Qué es una receta?", _TEXTO_RECETAS))
+        btn_ayuda = BotonAyuda("¿Qué es una receta?", _TEXTO_RECETAS)
         fila_receta.addWidget(btn_ayuda)
         secl.addLayout(fila_receta)
 

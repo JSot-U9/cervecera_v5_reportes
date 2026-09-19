@@ -98,3 +98,20 @@ def crear_cliente(tipo: str, nombre: str, documento: str = "", telefono: str = "
         db.commit()
         db.refresh(c)
         return c
+
+
+def actualizar_cliente(cliente_id: int, **campos):
+    """Edita los datos de un cliente ya registrado.
+
+    Antes la ventana de Ventas solo permitía buscar clientes o crear
+    uno nuevo — si el número de teléfono o el documento de un cliente
+    existente estaba mal, no había forma de corregirlo sin editar la
+    base de datos directamente.
+    """
+    with nueva_sesion() as db:
+        c = db.get(Cliente, cliente_id)
+        if not c:
+            raise ValueError("Cliente no encontrado.")
+        for clave, valor in campos.items():
+            setattr(c, clave, valor)
+        db.commit()

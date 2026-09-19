@@ -6,7 +6,7 @@ Análisis de costos reales y márgenes de ganancia por lote de producción cerra
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QPushButton, QMessageBox
 
 from app.logica_costos import resumen_costos, kpis_costos
-from app.ui.widgets import EncabezadoModulo, TarjetaKPI, BarraBusqueda, TablaDatos
+from app.ui.widgets import EncabezadoModulo, TarjetaKPI, BarraBusqueda, TablaDatos, BotonAyuda
 from app.ui.estilos import poner_clase
 
 _TEXTO_COSTOS = (
@@ -36,11 +36,7 @@ class VistaCostos(QWidget):
 
         fila_titulo = QHBoxLayout()
         fila_titulo.addStretch()
-        btn_ayuda = QPushButton("❓")
-        btn_ayuda.setFixedWidth(30)
-        poner_clase(btn_ayuda, "secundario")
-        btn_ayuda.clicked.connect(
-            lambda: QMessageBox.information(self, "¿Cómo se calculan los costos?", _TEXTO_COSTOS))
+        btn_ayuda = BotonAyuda("¿Cómo se calculan los costos?", _TEXTO_COSTOS)
         fila_titulo.addWidget(btn_ayuda)
         cuerpo.addLayout(fila_titulo)
 
