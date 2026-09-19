@@ -9,6 +9,9 @@ Componentes:
   - BarraBusqueda        : campo de filtro + botones de acción
   - TablaDatos           : QTableWidget con filas alternas, tags de color y filtro
   - formatear_estado     : "EN_PROCESO" -> "🟠 En proceso"
+  - tag_para_estado      : "EN_PROCESO" -> "advertencia" (color de fila)
+  - texto_pestana_legible: "🗂  Lotes FIFO" -> "Lotes FIFO"
+  - EstadoVacio          : mensaje de tabla/lista sin datos (con acción sugerida)
   - SeccionFormulario    : QGroupBox estilizado para agrupar campos
   - CampoFormulario      : label + entry/combobox con validación inline
   - DialogoConfirmacion / confirmar : diálogo modal sí/no
@@ -39,6 +42,37 @@ from app.ui.estilos import (
 # ══════════════════════════════════════════════════════════════════
 #  UTILIDADES DE VENTANA
 # ══════════════════════════════════════════════════════════════════
+
+_RE_PREFIJO_ICONO = re.compile(r"^[^\w]+")
+
+
+def texto_pestana_legible(texto: str) -> str:
+    """Quita el ícono/emoji decorativo y los espacios extra del
+    principio de una etiqueta de pestaña ("🗂  Lotes FIFO" -> "Lotes
+    FIFO"). Se usa para reflejar el nombre de la pestaña interna
+    activa en el breadcrumb del header sin duplicar a mano una lista
+    de nombres separada de las etiquetas reales de cada QTabWidget."""
+    return _RE_PREFIJO_ICONO.sub("", texto or "").strip()
+
+
+def conectar_pestanas_a_header(notebook, widget_hijo: QWidget):
+    """Conecta un QTabWidget de pestañas internas (self.notebook en
+    cada vista) para que, al cambiar de pestaña, el header superior
+    refleje cuál está activa (VentanaPrincipal.actualizar_pestana_interna).
+
+    widget_hijo es cualquier widget de la propia vista, solo para
+    llegar a self.window() — se resuelve en cada cambio (no una sola
+    vez al conectar) porque al construirse la vista todavía puede no
+    estar agregada al QStackedWidget de la ventana principal.
+    """
+    def _al_cambiar(indice):
+        ventana = widget_hijo.window()
+        if hasattr(ventana, "actualizar_pestana_interna"):
+            ventana.actualizar_pestana_interna(
+                texto_pestana_legible(notebook.tabText(indice))
+            )
+    notebook.currentChanged.connect(_al_cambiar)
+
 
 def centrar_ventana(ventana: QWidget, ancho: int, alto: int):
     ventana.resize(ancho, alto)
@@ -240,12 +274,26 @@ class TablaDatos(QTableWidget):
 
     def __init__(self, columnas: list, con_id: bool = True,
                  al_doble_clic=None, anchos: dict = None, parent=None,
-                 permitir_orden: bool = True):
+                 permitir_orden: bool = True, estado_vacio: "EstadoVacio" = None):
+        """
+        estado_vacio: widget EstadoVacio opcional que se muestra
+        superpuesto sobre la tabla cuando queda sin filas (sin
+        registros aún, o porque un filtro no encontró nada). Antes
+        cada vista mostraba, en ese caso, una grilla en blanco sin
+        ninguna explicación de qué pasó ni qué hacer al respecto.
+        """
         super().__init__(parent)
         self._con_id = con_id
         self._al_doble_clic = al_doble_clic
         self._filas_actuales: list = []
         self._tags_actuales: list = []
+
+        self._estado_vacio = estado_vacio
+        if estado_vacio is not None:
+            estado_vacio.setParent(self.viewport())
+            estado_vacio.setAttribute(Qt.WA_StyledBackground, True)
+            estado_vacio.setStyleSheet(f"background-color: {COLOR_TARJETA};")
+            estado_vacio.setVisible(False)
 
         self.setColumnCount(len(columnas))
         self.setHorizontalHeaderLabels(columnas)
@@ -281,6 +329,11 @@ class TablaDatos(QTableWidget):
 
         if al_doble_clic:
             self.cellDoubleClicked.connect(lambda r, c: al_doble_clic(self.id_seleccionado()))
+
+    def resizeEvent(self, evento):
+        super().resizeEvent(evento)
+        if self._estado_vacio is not None:
+            self._estado_vacio.setGeometry(self.viewport().rect())
 
     def empaquetar(self, **kwargs):
         """Compatibilidad con el nombre usado en la versión Tkinter:
@@ -378,6 +431,13 @@ class TablaDatos(QTableWidget):
                 self.setItem(i, c, item)
         self.setSortingEnabled(self._permitir_orden)
 
+        if self._estado_vacio is not None:
+            vacio = len(filas) == 0
+            self._estado_vacio.setVisible(vacio)
+            if vacio:
+                self._estado_vacio.setGeometry(self.viewport().rect())
+                self._estado_vacio.raise_()
+
     def filtrar(self, texto: str):
         texto = (texto or "").lower().strip()
         if not texto:
@@ -425,9 +485,18 @@ _ESTADO_MAP = {
     "VENCIDO":     ("⚫", "Vencido",    "alerta"),
     "BAJO":        ("🟡", "Stock bajo", "advertencia"),
     "ACTIVO":      ("🟢", "Activo",     "exito"),
-    "INACTIVO":    ("⚪", "Inactivo",   "normal"),
+    "INACTIVO":    ("🔴", "Inactivo",   "normal"),
     "PENDIENTE":   ("🟡", "Pendiente",  "advertencia"),
     "REGISTRADA":  ("🟢", "Registrada", "exito"),
+    "NORMAL":      ("🟢", "Normal",     "exito"),
+    # Prioridades del motor de Reposición inteligente (Centro de
+    # Inteligencia). Antes vivían en un diccionario aparte dentro de
+    # vista_centro_inteligencia.py (_PRIORIDAD_TEXTO/_PRIORIDAD_TAG),
+    # con su propio criterio de ícono/color — se unifican aquí para
+    # que todo estado del sistema pase por la misma fuente de verdad.
+    "ALTA":        ("🔴", "Alta",       "alerta"),
+    "MEDIA":       ("🟠", "Media",      "advertencia"),
+    "BAJA":        ("🟢", "Baja",       "normal"),
 }
 
 
@@ -436,6 +505,19 @@ def formatear_estado(estado_interno: str) -> str:
     if info:
         return f"{info[0]} {info[1]}"
     return estado_interno
+
+
+def tag_para_estado(estado_interno: str) -> str:
+    """Tag de color (para tags_por_fila de TablaDatos) que le
+    corresponde a un estado interno, leído del mismo _ESTADO_MAP que
+    usa formatear_estado(). Antes cada vista decidía el color de fila
+    con su propia lógica "a mano", separada del texto/ícono que
+    mostraba — lo que permitía que quedaran desincronizados (un
+    estado con ícono verde pero fila sin resaltar, por ejemplo). Con
+    una sola fuente de verdad eso ya no puede pasar.
+    """
+    info = _ESTADO_MAP.get(str(estado_interno).upper())
+    return info[2] if info else "normal"
 
 
 # ══════════════════════════════════════════════════════════════════

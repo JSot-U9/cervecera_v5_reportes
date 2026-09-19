@@ -6,7 +6,7 @@ Análisis de costos reales y márgenes de ganancia por lote de producción cerra
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QPushButton, QMessageBox
 
 from app.logica_costos import resumen_costos, kpis_costos
-from app.ui.widgets import EncabezadoModulo, TarjetaKPI, BarraBusqueda, TablaDatos, BotonAyuda
+from app.ui.widgets import EncabezadoModulo, TarjetaKPI, BarraBusqueda, TablaDatos, BotonAyuda, EstadoVacio
 from app.ui.estilos import poner_clase
 
 _TEXTO_COSTOS = (
@@ -66,6 +66,11 @@ class VistaCostos(QWidget):
             anchos={"N° Orden": 95, "N° Lote": 110, "Producto": 160, "Cantidad (L)": 90,
                     "Insumos (S/)": 100, "M.O. (S/)": 90, "Indirectos (S/)": 100,
                     "Total (S/)": 100, "Unit. (S/)": 90, "Margen (%)": 90},
+            estado_vacio=EstadoVacio(
+                "📊", "Sin costos que mostrar",
+                "Todavía no hay lotes de producción cerrados con costos calculados, "
+                "o el filtro no encontró coincidencias.",
+            ),
         )
         cuerpo.addWidget(self.tabla, stretch=1)
         self.tutorial_targets["tabla"] = self.tabla

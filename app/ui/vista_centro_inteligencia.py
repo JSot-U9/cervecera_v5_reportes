@@ -37,7 +37,8 @@ from app.ui.estilos import (
 )
 from app.ui.widgets import (
     EncabezadoModulo, TarjetaKPI, MensajeEstado, TablaDatos, SeccionFormulario,
-    ejecutar_con_carga, ejecutar_en_hilo,
+    ejecutar_con_carga, ejecutar_en_hilo, formatear_estado, tag_para_estado,
+    EstadoVacio, conectar_pestanas_a_header,
 )
 
 from app.ia import reposicion as motor_reposicion
@@ -45,10 +46,6 @@ from app.ia.merma_prediction import predecir_merma, listar_recetas_para_predicci
 from app.ia.demanda_data import listar_productos_con_ventas, diagnostico_historial
 from app.ia.demanda_prediction import predecir_demanda
 from app.ui.vista_prediccion import VistaPrediccion
-
-
-_PRIORIDAD_TAG = {"ALTA": "alerta", "MEDIA": "advertencia", "BAJA": "normal"}
-_PRIORIDAD_TEXTO = {"ALTA": "🔴 Alta", "MEDIA": "🟠 Media", "BAJA": "🟢 Baja"}
 
 
 class VistaCentroInteligencia(QWidget):
@@ -116,6 +113,8 @@ class VistaCentroInteligencia(QWidget):
         self.tutorial_targets["combo_producto_prediccion"] = self._vista_prediccion_detalle._combo_producto
         self.tutorial_targets["btn_predecir_prediccion"] = self._vista_prediccion_detalle._btn_predecir
 
+        conectar_pestanas_a_header(self.tabs, self)
+
     def mostrar_tab_prediccion_detalle(self):
         """API pública: usada por los enlaces "🧠 Demanda prevista" de
         Ventas/Producción para abrir directamente la pestaña de
@@ -166,6 +165,11 @@ class VistaCentroInteligencia(QWidget):
             con_id=True,
             anchos={"Insumo": 200, "Stock disp.": 90, "Demanda esp.": 100,
                     "Stock seguridad": 110, "Recomendado": 100, "Prioridad": 90},
+            estado_vacio=EstadoVacio(
+                "📦", "Sin recomendaciones todavía",
+                "Presiona \"🔄 Calcular recomendaciones\" para que el motor analice "
+                "stock, demanda y consumo histórico.",
+            ),
         )
         self.tabla_reposicion.cellClicked.connect(self._al_seleccionar_recomendacion)
         v.addWidget(self.tabla_reposicion, stretch=1)
@@ -214,10 +218,10 @@ class VistaCentroInteligencia(QWidget):
         filas = [
             [r["producto_id"], f"{r['nombre']} ({r['unidad']})", f"{r['stock_disponible']:.2f}",
              f"{r['demanda_esperada']:.2f}", f"{r['stock_seguridad']:.2f}",
-             f"{r['cantidad_recomendada']:.2f}", _PRIORIDAD_TEXTO.get(r["prioridad"], r["prioridad"])]
+             f"{r['cantidad_recomendada']:.2f}", formatear_estado(r["prioridad"])]
             for r in recomendaciones
         ]
-        tags = [_PRIORIDAD_TAG.get(r["prioridad"], "normal") for r in recomendaciones]
+        tags = [tag_para_estado(r["prioridad"]) for r in recomendaciones]
         self.tabla_reposicion.cargar_filas(filas, tags_por_fila=tags)
 
         n_alta = sum(1 for r in recomendaciones if r["prioridad"] == "ALTA")
@@ -454,6 +458,11 @@ class VistaCentroInteligencia(QWidget):
             ["Producto", "Demanda prevista", "Promedio diario", "Riesgo de quiebre"],
             con_id=False,
             anchos={"Producto": 220, "Demanda prevista": 130, "Promedio diario": 120, "Riesgo de quiebre": 130},
+            estado_vacio=EstadoVacio(
+                "🔮", "Sin demanda prevista todavía",
+                "Presiona \"🔄 Actualizar resumen\" para calcular la demanda esperada "
+                "por producto, o espera a que haya suficiente historial de ventas.",
+            ),
         )
         v.addWidget(self.tabla_demanda, stretch=1)
         self.tutorial_targets["tabla_demanda"] = self.tabla_demanda

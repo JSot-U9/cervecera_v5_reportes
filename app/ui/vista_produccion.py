@@ -20,7 +20,7 @@ from app.logica_produccion import (
 )
 from app.ui.widgets import (
     EncabezadoModulo, BarraBusqueda, TablaDatos, SeccionFormulario, MensajeEstado,
-    centrar_ventana, formatear_estado, BotonAyuda,
+    centrar_ventana, formatear_estado, tag_para_estado, BotonAyuda, EstadoVacio,
 )
 from app.ui.estilos import COLOR_TEXTO_SECUNDARIO, COLOR_PRIMARIO, fuente, poner_clase, fondo
 
@@ -85,6 +85,13 @@ class VistaProduccion(QWidget):
             ["N° Orden", "Producto", "N° Lote", "Cant. Planeada", "Cant. Real", "Estado"],
             anchos={"N° Orden": 110, "Producto": 180, "N° Lote": 130,
                     "Cant. Planeada": 110, "Cant. Real": 100, "Estado": 130},
+            estado_vacio=EstadoVacio(
+                "🍺", "Sin órdenes de producción",
+                "Todavía no se registró ninguna orden de producción, o el filtro "
+                "no encontró coincidencias.",
+                texto_accion=("＋ Nueva orden" if puede_crear else ""),
+                accion=(self._abrir_nueva_orden if puede_crear else None),
+            ),
         )
         cuerpo.addWidget(self.tabla, stretch=1)
         self.tutorial_targets["tabla_ordenes"] = self.tabla
@@ -104,10 +111,7 @@ class VistaProduccion(QWidget):
             for orden in listar_ordenes(db):
                 producto = orden.receta.producto_terminado.nombre if orden.receta else "—"
                 estado_visual = formatear_estado(orden.estado)
-                tag = {
-                    "INICIADA": "advertencia", "EN_PROCESO": "advertencia",
-                    "COMPLETADA": "exito", "CANCELADA": "alerta",
-                }.get(orden.estado, "normal")
+                tag = tag_para_estado(orden.estado)
                 filas.append([
                     orden.id, orden.numero, producto, orden.numero_lote,
                     f"{orden.cantidad_planeada:.1f}",

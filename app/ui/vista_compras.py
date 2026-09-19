@@ -23,7 +23,7 @@ from app.logica_compras import (
 )
 from app.ui.widgets import (
     EncabezadoModulo, BarraBusqueda, TablaDatos, SeccionFormulario, MensajeEstado,
-    centrar_ventana, confirmar,
+    centrar_ventana, confirmar, EstadoVacio, conectar_pestanas_a_header,
 )
 from app.ui.estilos import COLOR_TEXTO_SECUNDARIO, COLOR_PRIMARIO, fuente, poner_clase
 
@@ -52,6 +52,7 @@ class VistaCompras(QWidget):
 
         self._pestana_ordenes()
         self._pestana_proveedores()
+        conectar_pestanas_a_header(self.notebook, self)
 
         self.refrescar()
 
@@ -79,6 +80,13 @@ class VistaCompras(QWidget):
             ["N° Orden", "Proveedor", "Fecha", "Doc. Referencia", "Total (S/)"],
             anchos={"N° Orden": 100, "Proveedor": 200, "Fecha": 110,
                     "Doc. Referencia": 140, "Total (S/)": 110},
+            estado_vacio=EstadoVacio(
+                "🧾", "Sin órdenes de compra",
+                "Todavía no se registró ninguna orden de compra, o el filtro no "
+                "encontró coincidencias.",
+                texto_accion=("＋ Nueva orden" if puede_crear else ""),
+                accion=(self._abrir_nueva_orden if puede_crear else None),
+            ),
         )
         pl.addWidget(self.tabla_ordenes, stretch=1)
         self.tutorial_targets["tabla_ordenes"] = self.tabla_ordenes
@@ -101,6 +109,13 @@ class VistaCompras(QWidget):
             ["Razón Social", "RUC", "Contacto", "Teléfono", "Correo"],
             anchos={"Razón Social": 200, "RUC": 110, "Contacto": 150,
                     "Teléfono": 120, "Correo": 180},
+            estado_vacio=EstadoVacio(
+                "🏭", "Sin proveedores que mostrar",
+                "Todavía no se registró ningún proveedor, o el filtro no encontró "
+                "coincidencias.",
+                texto_accion=("＋ Nuevo proveedor" if puede_crear else ""),
+                accion=(self._abrir_nuevo_proveedor if puede_crear else None),
+            ),
         )
         pl.addWidget(self.tabla_proveedores, stretch=1)
 

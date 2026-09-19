@@ -20,7 +20,7 @@ from app.logica_ventas import (
 from app.logica_inventario import StockInsuficiente
 from app.ui.widgets import (
     EncabezadoModulo, BarraBusqueda, TablaDatos, SeccionFormulario, MensajeEstado,
-    centrar_ventana,
+    centrar_ventana, EstadoVacio, conectar_pestanas_a_header,
 )
 from app.ui.estilos import COLOR_TEXTO_SECUNDARIO, COLOR_PRIMARIO, COLOR_EXITO, fuente, poner_clase, fondo
 
@@ -43,6 +43,7 @@ class VistaVentas(QWidget):
 
         self._pestana_ordenes()
         self._pestana_clientes()
+        conectar_pestanas_a_header(self.notebook, self)
 
         self.refrescar()
 
@@ -69,6 +70,13 @@ class VistaVentas(QWidget):
         self.tabla_ventas = TablaDatos(
             ["N° Orden", "Cliente", "Fecha", "Total (S/)"],
             anchos={"N° Orden": 110, "Cliente": 220, "Fecha": 120, "Total (S/)": 130},
+            estado_vacio=EstadoVacio(
+                "🧾", "Sin órdenes de venta",
+                "Todavía no se registró ninguna venta, o el filtro no encontró "
+                "coincidencias.",
+                texto_accion=("＋ Nueva venta" if puede_crear else ""),
+                accion=(self._abrir_nueva_venta if puede_crear else None),
+            ),
         )
         pl.addWidget(self.tabla_ventas, stretch=1)
         self.tutorial_targets["tabla_ventas"] = self.tabla_ventas
@@ -90,6 +98,13 @@ class VistaVentas(QWidget):
         self.tabla_clientes = TablaDatos(
             ["Tipo", "Nombre / Razón Social", "N° Documento", "Teléfono"],
             anchos={"Tipo": 90, "Nombre / Razón Social": 220, "N° Documento": 130, "Teléfono": 130},
+            estado_vacio=EstadoVacio(
+                "👥", "Sin clientes que mostrar",
+                "Todavía no se registró ningún cliente, o el filtro no encontró "
+                "coincidencias.",
+                texto_accion=("＋ Nuevo cliente" if puede_crear else ""),
+                accion=(self._abrir_nuevo_cliente if puede_crear else None),
+            ),
         )
         pl.addWidget(self.tabla_clientes, stretch=1)
         self.tutorial_targets["tabla_clientes"] = self.tabla_clientes

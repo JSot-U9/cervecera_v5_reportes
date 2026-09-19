@@ -16,7 +16,8 @@ from app.seguridad import puede, modulos_visibles
 from app.logica_inventario import stock_total, ajustar_stock, siguiente_codigo
 from app.ui.widgets import (
     EncabezadoModulo, BarraBusqueda, TablaDatos, SeccionFormulario, MensajeEstado,
-    centrar_ventana, formatear_estado, BotonAyuda,
+    centrar_ventana, formatear_estado, tag_para_estado, BotonAyuda,
+    EstadoVacio, conectar_pestanas_a_header,
 )
 from app.ui.estilos import COLOR_TEXTO_SECUNDARIO, COLOR_PRIMARIO, fuente, poner_clase, fondo
 
@@ -48,6 +49,7 @@ class VistaInventario(QWidget):
         self._pestana_lotes()
         self._pestana_movimientos()
         self._pestana_catalogo()
+        conectar_pestanas_a_header(self.notebook, self)
 
         self.refrescar()
 
@@ -71,6 +73,11 @@ class VistaInventario(QWidget):
             ["Código", "Nombre", "Tipo", "Stock", "Unidad", "Stock Mín.", "Estado"],
             anchos={"Código": 90, "Nombre": 180, "Tipo": 120, "Stock": 90,
                     "Unidad": 80, "Stock Mín.": 90, "Estado": 110},
+            estado_vacio=EstadoVacio(
+                "📦", "Sin productos que mostrar",
+                "No hay productos activos con stock registrado, o el filtro no "
+                "encontró coincidencias.",
+            ),
         )
         pl.addWidget(self.tabla_stock, stretch=1)
         self.tutorial_targets["tabla_stock"] = self.tabla_stock
@@ -104,6 +111,12 @@ class VistaInventario(QWidget):
             ["N° Lote", "Producto", "Ingresado", "Vencimiento", "Cantidad", "Estado"],
             anchos={"N° Lote": 130, "Producto": 170, "Ingresado": 110,
                     "Vencimiento": 110, "Cantidad": 90, "Estado": 120},
+            estado_vacio=EstadoVacio(
+                "🗂", "Sin lotes que mostrar",
+                "Todavía no se registró ningún lote de inventario, o el filtro no "
+                "encontró coincidencias. Los lotes se crean automáticamente al "
+                "registrar una compra o cerrar una producción.",
+            ),
         )
         pl.addWidget(self.tabla_lotes, stretch=1)
         self.tutorial_targets["tabla_lotes"] = self.tabla_lotes
@@ -122,6 +135,11 @@ class VistaInventario(QWidget):
             ["Producto", "Lote", "Tipo", "Cantidad", "Referencia", "Fecha"],
             anchos={"Producto": 160, "Lote": 120, "Tipo": 100,
                     "Cantidad": 80, "Referencia": 160, "Fecha": 130},
+            estado_vacio=EstadoVacio(
+                "📋", "Sin movimientos que mostrar",
+                "Todavía no hay movimientos de inventario registrados, o el "
+                "filtro no encontró coincidencias.",
+            ),
         )
         pl.addWidget(self.tabla_movimientos, stretch=1)
         self.tutorial_targets["tabla_movimientos"] = self.tabla_movimientos
@@ -143,6 +161,13 @@ class VistaInventario(QWidget):
             ["Código", "Nombre", "Tipo", "Unidad", "Precio Venta (S/)", "Stock Mín."],
             anchos={"Código": 90, "Nombre": 180, "Tipo": 120, "Unidad": 70,
                     "Precio Venta (S/)": 130, "Stock Mín.": 90},
+            estado_vacio=EstadoVacio(
+                "📦", "Sin productos en el catálogo",
+                "Todavía no se registró ningún producto, o el filtro no encontró "
+                "coincidencias.",
+                texto_accion=("＋ Nuevo producto" if puede_editar else ""),
+                accion=(self._abrir_nuevo_producto if puede_editar else None),
+            ),
         )
         pl.addWidget(self.tabla_catalogo, stretch=1)
         self.tutorial_targets["tabla_catalogo"] = self.tabla_catalogo
@@ -161,11 +186,12 @@ class VistaInventario(QWidget):
                     Producto.tipo, Producto.nombre).all():
                 stock = stock_total(db, p.id)
                 if stock <= 0:
-                    estado, tag = "🔴 Agotado", "alerta"
+                    estado_interno = "AGOTADO"
                 elif stock < p.stock_minimo:
-                    estado, tag = "🟡 Stock bajo", "advertencia"
+                    estado_interno = "BAJO"
                 else:
-                    estado, tag = "🟢 Normal", "exito"
+                    estado_interno = "NORMAL"
+                estado, tag = formatear_estado(estado_interno), tag_para_estado(estado_interno)
                 filas_stock.append([
                     p.id, p.codigo, p.nombre, p.tipo, f"{stock:.2f}",
                     p.unidad_medida or "—", f"{p.stock_minimo:.2f}", estado,
@@ -177,7 +203,7 @@ class VistaInventario(QWidget):
                      .order_by(LoteInventario.fecha_ingreso.asc(), LoteInventario.id.asc()).all())
             for lote in lotes:
                 estado = formatear_estado(lote.estado)
-                tag = "alerta" if lote.estado in ("VENCIDO", "AGOTADO") else "normal"
+                tag = tag_para_estado(lote.estado)
                 filas_lotes.append([
                     lote.id, lote.numero_lote, lote.producto.nombre,
                     str(lote.fecha_ingreso),

@@ -17,7 +17,8 @@ from app.logica_autenticacion import (
 from app.logica_configuracion import obtener_datos_empresa, guardar_datos_empresa
 from app.ui.widgets import (
     EncabezadoModulo, BarraBusqueda, TablaDatos, SeccionFormulario, MensajeEstado,
-    centrar_ventana, confirmar,
+    centrar_ventana, confirmar, formatear_estado, tag_para_estado, EstadoVacio,
+    conectar_pestanas_a_header,
 )
 from app.ui.estilos import (
     COLOR_TEXTO_SECUNDARIO, COLOR_PRIMARIO, COLOR_SIDEBAR, COLOR_TEXTO, fuente, poner_clase, fondo,
@@ -52,6 +53,7 @@ class VistaAdmin(QWidget):
         self._pestana_usuarios()
         self._pestana_empresa()
         self._pestana_logs()
+        conectar_pestanas_a_header(self.notebook, self)
 
         self.refrescar()
 
@@ -71,6 +73,12 @@ class VistaAdmin(QWidget):
         self.tabla_usuarios = TablaDatos(
             ["Usuario (login)", "Nombre Completo", "Rol", "Estado"],
             anchos={"Usuario (login)": 140, "Nombre Completo": 200, "Rol": 120, "Estado": 120},
+            estado_vacio=EstadoVacio(
+                "👤", "Sin usuarios que mostrar",
+                "Todavía no se registró ningún usuario, o el filtro no encontró "
+                "coincidencias.",
+                texto_accion="＋ Nuevo usuario", accion=self._abrir_nuevo_usuario,
+            ),
         )
         pl.addWidget(self.tabla_usuarios, stretch=1)
 
@@ -201,14 +209,19 @@ class VistaAdmin(QWidget):
         self.tabla_logs = TablaDatos(
             ["Usuario", "Acción", "Detalle", "Fecha y Hora"],
             anchos={"Usuario": 130, "Acción": 130, "Detalle": 260, "Fecha y Hora": 150},
+            estado_vacio=EstadoVacio(
+                "📋", "Sin registros de acceso",
+                "Todavía no hay registros de acceso guardados, o el filtro no "
+                "encontró coincidencias.",
+            ),
         )
         pl.addWidget(self.tabla_logs, stretch=1)
 
     def refrescar(self):
         filas_usuarios, tags_usuarios = [], []
         for u in listar_usuarios():
-            estado = "🟢 Activo" if u.activo else "⚪ Inactivo"
-            tag = "exito" if u.activo else "normal"
+            estado = formatear_estado("ACTIVO" if u.activo else "INACTIVO")
+            tag = tag_para_estado("ACTIVO" if u.activo else "INACTIVO")
             filas_usuarios.append([u.id, u.usuario, u.nombre_completo, u.rol, estado])
             tags_usuarios.append(tag)
         self.tabla_usuarios.cargar_filas(filas_usuarios, tags_por_fila=tags_usuarios)
