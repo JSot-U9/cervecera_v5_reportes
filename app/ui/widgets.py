@@ -485,7 +485,7 @@ _ESTADO_MAP = {
     "VENCIDO":     ("⚫", "Vencido",    "alerta"),
     "BAJO":        ("🟡", "Stock bajo", "advertencia"),
     "ACTIVO":      ("🟢", "Activo",     "exito"),
-    "INACTIVO":    ("🔴", "Inactivo",   "normal"),
+    "INACTIVO":    ("⚪", "Inactivo",   "normal"),
     "PENDIENTE":   ("🟡", "Pendiente",  "advertencia"),
     "REGISTRADA":  ("🟢", "Registrada", "exito"),
     "NORMAL":      ("🟢", "Normal",     "exito"),

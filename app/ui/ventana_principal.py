@@ -442,7 +442,7 @@ class VentanaPrincipal(QMainWindow):
     def obtener_vista(self, clave: str):
         return self._vistas.get(clave)
 
-    def actualizar_pestana_interna(self, nombre_pestana: str):
+    def actualizar_pestana_interna(self, nombre_pestana: str, migas_extra: list = None):
         """Refleja en el header la pestaña interna activa dentro del
         módulo actual (ej. "Inventario · Lotes FIFO"), sin volver a
         navegar ni reconstruir la vista. Antes el header solo se
@@ -451,8 +451,15 @@ class VentanaPrincipal(QMainWindow):
         "Lotes" en Inventario, por ejemplo) no se reflejaba en ningún
         lado fuera de la pestaña misma.
 
+        migas_extra permite reflejar más de un nivel de profundidad
+        (ej. una pantalla de detalle: ["Productos", "Anka Chida"] en
+        vez de un solo segmento) — si no se pasa, se usa [nombre_pestana].
+
         Cada vista con pestañas internas (self.notebook) llama a esto
-        desde su propio manejador de currentChanged.
+        desde su propio manejador de currentChanged; las pantallas
+        profundas (como el detalle de producto) lo llaman al abrirse
+        y otra vez al volver, con el nombre de la pestaña que quedó
+        activa.
         """
         titulo_base, migas_base = _TITULOS_MODULO.get(
             self._clave_activa, (self._clave_activa or "", [self._clave_activa or ""])
@@ -460,8 +467,9 @@ class VentanaPrincipal(QMainWindow):
         if not nombre_pestana:
             self._header.establecer_titulo(titulo_base, migas_base)
             return
+        extra = migas_extra if migas_extra else [nombre_pestana]
         self._header.establecer_titulo(
-            f"{titulo_base} · {nombre_pestana}", migas_base + [nombre_pestana]
+            f"{titulo_base} · {nombre_pestana}", migas_base + extra
         )
 
     def vista_activa(self):

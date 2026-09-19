@@ -144,6 +144,82 @@ def _demanda_proyectada_insumos(horizonte_dias: int) -> dict:
     return resultado
 
 
+def _evaluar_insumo(db, insumo, proyeccion: dict, horizonte_dias: int,
+                     dias_cobertura_seguridad: int) -> dict | None:
+    """Evalúa la recomendación de reposición de UN insumo puntual.
+    Factorizado fuera de calcular_recomendaciones() para que
+    calcular_recomendacion_individual() (usada desde el detalle de
+    producto) pueda reevaluar un solo insumo sin repetir esta lógica.
+    Devuelve None si no hace falta mostrarlo (sin necesidad de
+    reposición y no está bajo el stock mínimo)."""
+    stock_disponible = stock_total(db, insumo.id)
+    consumo_hist = _consumo_diario_historico(db, insumo.id)
+    proy = proyeccion.get(insumo.id)
+
+    if proy and proy["cantidad"] > 0:
+        demanda_esperada = proy["cantidad"]
+        origen = proy["origen"]
+        detalle_origen = "; ".join(proy["detalle"][:3])
+    elif consumo_hist["dias_con_datos"] > 0 and consumo_hist["media_diaria"] > 0:
+        demanda_esperada = consumo_hist["media_diaria"] * horizonte_dias
+        origen = "historico"
+        detalle_origen = (
+            f"consumo histórico promedio de {consumo_hist['media_diaria']:.2f} "
+            f"{insumo.unidad_medida or ''}/día en los últimos {DIAS_HISTORIAL_CONSUMO} días"
+        )
+    else:
+        demanda_esperada = 0.0
+        origen = "sin_datos"
+        detalle_origen = "sin historial de consumo ni pronóstico de demanda disponible"
+
+    if consumo_hist["dias_con_datos"] > 0:
+        stock_seguridad = (
+            consumo_hist["media_diaria"] * dias_cobertura_seguridad
+            + 1.65 * consumo_hist["desviacion_diaria"] * math.sqrt(max(dias_cobertura_seguridad, 1))
+        )
+    else:
+        stock_seguridad = insumo.stock_minimo or 0.0
+
+    cantidad_recomendada = max(0.0, demanda_esperada + stock_seguridad - stock_disponible)
+
+    bajo_minimo = stock_disponible <= (insumo.stock_minimo or 0.0)
+    if bajo_minimo:
+        prioridad = "ALTA"
+    elif cantidad_recomendada > 0 and demanda_esperada > 0:
+        cobertura_dias = (
+            stock_disponible / consumo_hist["media_diaria"]
+            if consumo_hist["media_diaria"] > 0 else None
+        )
+        prioridad = "MEDIA" if (cobertura_dias is None or cobertura_dias <= horizonte_dias) else "BAJA"
+    else:
+        prioridad = "BAJA"
+
+    if cantidad_recomendada <= 0 and not bajo_minimo:
+        return None  # no hace falta mostrar insumos sin necesidad de reposición
+
+    motivo = (
+        f"Demanda esperada ({horizonte_dias} días): {demanda_esperada:.2f} "
+        f"{insumo.unidad_medida or ''} [{detalle_origen}] "
+        f"+ stock de seguridad {stock_seguridad:.2f} "
+        f"− stock disponible {stock_disponible:.2f}."
+    )
+
+    return {
+        "producto_id": insumo.id,
+        "codigo": insumo.codigo,
+        "nombre": insumo.nombre,
+        "unidad": insumo.unidad_medida or "",
+        "stock_disponible": round(stock_disponible, 2),
+        "stock_minimo": insumo.stock_minimo or 0.0,
+        "demanda_esperada": round(demanda_esperada, 2),
+        "stock_seguridad": round(stock_seguridad, 2),
+        "cantidad_recomendada": round(cantidad_recomendada, 2),
+        "origen_demanda": origen,
+        "prioridad": prioridad,
+        "motivo": motivo,
+    }
+
+
 def calcular_recomendaciones(
     horizonte_dias: int = HORIZONTE_DIAS_DEFECTO,
     dias_cobertura_seguridad: int = DIAS_COBERTURA_SEGURIDAD_DEFECTO,
@@ -168,77 +244,44 @@ def calcular_recomendaciones(
         insumos = db.query(Producto).filter_by(tipo="Insumo", activo=True).all()
 
         for insumo in insumos:
-            stock_disponible = stock_total(db, insumo.id)
-            consumo_hist = _consumo_diario_historico(db, insumo.id)
-            proy = proyeccion.get(insumo.id)
-
-            if proy and proy["cantidad"] > 0:
-                demanda_esperada = proy["cantidad"]
-                origen = proy["origen"]
-                detalle_origen = "; ".join(proy["detalle"][:3])
-            elif consumo_hist["dias_con_datos"] > 0 and consumo_hist["media_diaria"] > 0:
-                demanda_esperada = consumo_hist["media_diaria"] * horizonte_dias
-                origen = "historico"
-                detalle_origen = (
-                    f"consumo histórico promedio de {consumo_hist['media_diaria']:.2f} "
-                    f"{insumo.unidad_medida or ''}/día en los últimos {DIAS_HISTORIAL_CONSUMO} días"
-                )
-            else:
-                demanda_esperada = 0.0
-                origen = "sin_datos"
-                detalle_origen = "sin historial de consumo ni pronóstico de demanda disponible"
-
-            # Stock de seguridad: "colchón" simple y transparente en días
-            # de consumo extra, usando la variabilidad histórica cuando existe.
-            if consumo_hist["dias_con_datos"] > 0:
-                stock_seguridad = (
-                    consumo_hist["media_diaria"] * dias_cobertura_seguridad
-                    + 1.65 * consumo_hist["desviacion_diaria"] * math.sqrt(max(dias_cobertura_seguridad, 1))
-                )
-            else:
-                stock_seguridad = insumo.stock_minimo or 0.0
-
-            cantidad_recomendada = max(0.0, demanda_esperada + stock_seguridad - stock_disponible)
-
-            bajo_minimo = stock_disponible <= (insumo.stock_minimo or 0.0)
-            if bajo_minimo:
-                prioridad = "ALTA"
-            elif cantidad_recomendada > 0 and demanda_esperada > 0:
-                cobertura_dias = (
-                    stock_disponible / consumo_hist["media_diaria"]
-                    if consumo_hist["media_diaria"] > 0 else None
-                )
-                prioridad = "MEDIA" if (cobertura_dias is None or cobertura_dias <= horizonte_dias) else "BAJA"
-            else:
-                prioridad = "BAJA"
-
-            if cantidad_recomendada <= 0 and not bajo_minimo:
-                continue  # no hace falta mostrar insumos sin necesidad de reposición
-
-            motivo = (
-                f"Demanda esperada ({horizonte_dias} días): {demanda_esperada:.2f} "
-                f"{insumo.unidad_medida or ''} [{detalle_origen}] "
-                f"+ stock de seguridad {stock_seguridad:.2f} "
-                f"− stock disponible {stock_disponible:.2f}."
-            )
-
-            recomendaciones.append({
-                "producto_id": insumo.id,
-                "codigo": insumo.codigo,
-                "nombre": insumo.nombre,
-                "unidad": insumo.unidad_medida or "",
-                "stock_disponible": round(stock_disponible, 2),
-                "stock_minimo": insumo.stock_minimo or 0.0,
-                "demanda_esperada": round(demanda_esperada, 2),
-                "stock_seguridad": round(stock_seguridad, 2),
-                "cantidad_recomendada": round(cantidad_recomendada, 2),
-                "origen_demanda": origen,
-                "prioridad": prioridad,
-                "motivo": motivo,
-            })
+            r = _evaluar_insumo(db, insumo, proyeccion, horizonte_dias, dias_cobertura_seguridad)
+            if r is not None:
+                recomendaciones.append(r)
 
     orden_prioridad = {"ALTA": 0, "MEDIA": 1, "BAJA": 2}
     recomendaciones.sort(
         key=lambda r: (orden_prioridad.get(r["prioridad"], 3), -r["cantidad_recomendada"])
     )
     return recomendaciones
+
+
+def calcular_recomendacion_individual(
+    insumo_id: int,
+    horizonte_dias: int = HORIZONTE_DIAS_DEFECTO,
+    dias_cobertura_seguridad: int = DIAS_COBERTURA_SEGURIDAD_DEFECTO,
+) -> dict | None:
+    """Recalcula la recomendación de reposición de UN solo insumo (la
+    usa la pestaña "🧠 Inteligencia" del detalle de producto, en
+    Inventario, para no tener que disparar el cálculo completo del
+    motor — que recorre TODO el catálogo de insumos — solo para ver
+    el número de uno.
+
+    Nota honesta sobre el alcance de la optimización: el paso que sigue
+    siendo "global" es _demanda_proyectada_insumos(), porque la demanda
+    de un insumo depende de TODAS las recetas activas que lo usan — no
+    hay forma de acotar ESE cálculo a un solo insumo sin cambiar la
+    fórmula del motor. Lo que SÍ se evita es recorrer el stock
+    disponible y el consumo histórico de cada insumo del catálogo
+    (la parte que crece con el tamaño del catálogo): esa parte se hace
+    una sola vez, para el insumo pedido.
+
+    Devuelve el mismo dict que un elemento de calcular_recomendaciones(),
+    o None si el insumo no existe, no es de tipo "Insumo", está
+    inactivo, o no necesita reposición ahora mismo.
+    """
+    proyeccion = _demanda_proyectada_insumos(horizonte_dias)
+    with nueva_sesion() as db:
+        insumo = db.get(Producto, insumo_id)
+        if insumo is None or insumo.tipo != "Insumo" or not insumo.activo:
+            return None
+        return _evaluar_insumo(db, insumo, proyeccion, horizonte_dias, dias_cobertura_seguridad)

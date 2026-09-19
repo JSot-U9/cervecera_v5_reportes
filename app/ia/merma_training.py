@@ -32,6 +32,7 @@ from app.ia.merma_data import (
 from app.ia.merma_features import construir_features, COLUMNAS_FEATURES, COLUMNA_OBJETIVO
 from app.ia.demanda_metrics import calcular_todas  # las métricas MAE/RMSE/MAPE son genéricas
 from app.ia.merma_model import ModeloXGBoostMerma, BaselinePromedioReceta
+from app.ia.persistencia_modelos import cargar_xgboost_con_auto_migracion
 
 logger = logging.getLogger(__name__)
 
@@ -177,5 +178,7 @@ def cargar_modelos():
     mtime = RUTA_MODELO.stat().st_mtime
     if mtime not in _cache_modelos:
         _cache_modelos.clear()
-        _cache_modelos[mtime] = (joblib.load(RUTA_MODELO), joblib.load(RUTA_BASELINE))
+        _cache_modelos[mtime] = (
+            cargar_xgboost_con_auto_migracion(RUTA_MODELO), joblib.load(RUTA_BASELINE)
+        )
     return _cache_modelos[mtime]

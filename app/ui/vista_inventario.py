@@ -6,7 +6,7 @@ Stock actual · Lotes FIFO · Movimientos · Catálogo de productos.
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QWidget, QDialog, QVBoxLayout, QHBoxLayout, QGridLayout, QLabel,
-    QLineEdit, QComboBox, QPushButton, QTabWidget, QMessageBox,
+    QLineEdit, QComboBox, QPushButton, QTabWidget, QStackedWidget, QMessageBox,
 )
 
 from app.basedatos import nueva_sesion
@@ -17,8 +17,9 @@ from app.logica_inventario import stock_total, ajustar_stock, siguiente_codigo
 from app.ui.widgets import (
     EncabezadoModulo, BarraBusqueda, TablaDatos, SeccionFormulario, MensajeEstado,
     centrar_ventana, formatear_estado, tag_para_estado, BotonAyuda,
-    EstadoVacio, conectar_pestanas_a_header,
+    EstadoVacio, conectar_pestanas_a_header, texto_pestana_legible,
 )
+from app.ui.vista_detalle_producto import VistaDetalleProducto
 from app.ui.estilos import COLOR_TEXTO_SECUNDARIO, COLOR_PRIMARIO, fuente, poner_clase, fondo
 
 _TEXTO_FIFO = (
@@ -42,8 +43,22 @@ class VistaInventario(QWidget):
             icono="📦",
         ))
 
+        # Un QStackedWidget con dos páginas: [0] las pestañas normales
+        # del módulo, [1] el detalle de un producto (Parte 3). Antes no
+        # existía forma de "entrar" a un producto — Inventario era
+        # solo tablas planas. Usar la misma instancia de página en vez
+        # de una ventana/diálogo aparte es lo que permite que "‹
+        # Volver" regrese exactamente al filtro y a la pestaña donde
+        # el usuario los dejó, sin reconstruir nada.
+        self._stack = QStackedWidget()
+        layout.addWidget(self._stack, stretch=1)
+
         self.notebook = QTabWidget()
-        layout.addWidget(self.notebook, stretch=1)
+        self._stack.addWidget(self.notebook)
+
+        self._detalle_producto = VistaDetalleProducto(
+            volver=self._volver_de_detalle, al_guardar=self.refrescar)
+        self._stack.addWidget(self._detalle_producto)
 
         self._pestana_stock()
         self._pestana_lotes()
@@ -73,6 +88,7 @@ class VistaInventario(QWidget):
             ["Código", "Nombre", "Tipo", "Stock", "Unidad", "Stock Mín.", "Estado"],
             anchos={"Código": 90, "Nombre": 180, "Tipo": 120, "Stock": 90,
                     "Unidad": 80, "Stock Mín.": 90, "Estado": 110},
+            al_doble_clic=self._abrir_detalle_producto,
             estado_vacio=EstadoVacio(
                 "📦", "Sin productos que mostrar",
                 "No hay productos activos con stock registrado, o el filtro no "
@@ -81,6 +97,11 @@ class VistaInventario(QWidget):
         )
         pl.addWidget(self.tabla_stock, stretch=1)
         self.tutorial_targets["tabla_stock"] = self.tabla_stock
+
+        lbl_pista = QLabel("💡 Doble clic en un producto para ver su detalle completo.")
+        lbl_pista.setStyleSheet(f"color: {COLOR_TEXTO_SECUNDARIO};")
+        lbl_pista.setFont(fuente(8, cursiva=True))
+        pl.addWidget(lbl_pista)
 
     def _pestana_lotes(self):
         pestana = QWidget()
@@ -178,6 +199,27 @@ class VistaInventario(QWidget):
         ventana = self.window()
         if hasattr(ventana, "navegar"):
             ventana.navegar("centro_inteligencia")
+
+    def _abrir_detalle_producto(self, producto_id):
+        """Doble clic en una fila de Stock Actual: entra a la vista de
+        detalle (Parte 3), cambiando de página del QStackedWidget sin
+        reconstruir la tabla que queda detrás."""
+        if not producto_id:
+            return
+        self._detalle_producto.cargar(producto_id)
+        self._stack.setCurrentWidget(self._detalle_producto)
+
+    def _volver_de_detalle(self):
+        """'‹ Volver' desde el detalle de producto: regresa a las
+        pestañas del módulo en el mismo estado de filtro/pestaña en
+        que estaban (nunca se reconstruyeron), y reacomoda el
+        breadcrumb del header a la pestaña interna que sigue activa."""
+        self._stack.setCurrentWidget(self.notebook)
+        ventana = self.window()
+        if hasattr(ventana, "actualizar_pestana_interna"):
+            ventana.actualizar_pestana_interna(
+                texto_pestana_legible(self.notebook.tabText(self.notebook.currentIndex()))
+            )
 
     def refrescar(self):
         with nueva_sesion() as db:

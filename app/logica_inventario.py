@@ -225,3 +225,40 @@ def lotes_proximos_a_vencer(db, dias: int = 30):
         .order_by(LoteInventario.fecha_vencimiento.asc())
         .all()
     )
+
+
+def actualizar_producto(db, producto_id: int, *, nombre: str = None,
+                         unidad_medida: str = None, precio_venta: float = None,
+                         stock_minimo: float = None, descripcion: str = None) -> Producto:
+    """Actualiza los datos editables de un producto ya existente (pestaña
+    "Información" de la vista de detalle de producto, en Inventario).
+
+    El código y el tipo NO se pueden cambiar acá a propósito: el
+    código se generó a partir del tipo al crear el producto
+    (siguiente_codigo()), así que cambiar el tipo después dejaría el
+    código desalineado con el resto del catálogo de ese tipo (un
+    "INS-0007" que en realidad ahora es un producto terminado, por
+    ejemplo).
+    """
+    producto = db.get(Producto, producto_id)
+    if producto is None:
+        raise ValueError(f"No existe el producto con id {producto_id}.")
+    if nombre is not None:
+        nombre = nombre.strip()
+        if not nombre:
+            raise ValueError("El nombre no puede quedar vacío.")
+        producto.nombre = nombre
+    if unidad_medida is not None:
+        producto.unidad_medida = unidad_medida.strip()
+    if precio_venta is not None:
+        if precio_venta < 0:
+            raise ValueError("El precio de venta no puede ser negativo.")
+        producto.precio_venta = precio_venta
+    if stock_minimo is not None:
+        if stock_minimo < 0:
+            raise ValueError("El stock mínimo no puede ser negativo.")
+        producto.stock_minimo = stock_minimo
+    if descripcion is not None:
+        producto.descripcion = descripcion.strip()
+    db.flush()
+    return producto
