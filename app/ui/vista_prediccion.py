@@ -192,7 +192,7 @@ class GraficoSVG(QLabel):
 class VistaPrediccion(QWidget):
     """Vista completa del módulo de Predicción de Demanda."""
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, embebido: bool = False):
         super().__init__(parent)
         self._productos: list[dict] = []
         self._resultado_actual: dict | None = None
@@ -202,11 +202,16 @@ class VistaPrediccion(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
-        layout.addWidget(EncabezadoModulo(
-            "Predicción de Demanda",
-            "Estimación de demanda futura basada en historial de ventas · Modelo XGBoost",
-            icono="🔮",
-        ))
+        # embebido=True: se usa dentro de una pestaña de Centro de
+        # Inteligencia (sección G del reporte de bugs), que ya tiene su
+        # propio encabezado "🧠 Centro de Inteligencia" — repetir aquí
+        # un segundo encabezado se veía redundante.
+        if not embebido:
+            layout.addWidget(EncabezadoModulo(
+                "Predicción de Demanda",
+                "Estimación de demanda futura basada en historial de ventas · Modelo XGBoost",
+                icono="🔮",
+            ))
 
         self._banner = MensajeEstado()
         layout.addWidget(self._banner)

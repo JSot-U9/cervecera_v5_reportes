@@ -16,7 +16,7 @@ from PySide6.QtWidgets import (
 from app.logica_autenticacion import iniciar_sesion, ErrorAutenticacion
 from app.ui.estilos import COLOR_PRIMARIO, COLOR_ALERTA, COLOR_TEXTO_SECUNDARIO, fuente, poner_clase, fondo
 from app.ui.widgets import ajustar_ventana_a_contenido, centrar_ventana
-from app.ui.logo import cargar_logo
+from app.ui.logo import cargar_logo, EtiquetaLogoResponsiva
 from app.ui.dialogo_creditos import mostrar_creditos
 
 
@@ -39,9 +39,16 @@ class VentanaLogin(QDialog):
         flayout.setSpacing(6)
         flayout.setAlignment(Qt.AlignCenter)
 
-        lbl_logo = QLabel()
-        lbl_logo.setPixmap(cargar_logo("grande"))
-        lbl_logo.setAlignment(Qt.AlignCenter)
+        # El ancho útil de la franja es 380 − 30 − 30 = 320 px.
+        #
+        # EtiquetaLogoResponsiva: reescala el logo cada vez que su
+        # espacio cambia, en vez de fijar una escala una sola vez al
+        # construir la ventana — así nunca vuelve a quedar recortado
+        # ni superpuesto con el subtítulo de abajo.
+        ANCHO_UTIL_LOGO = 320
+        lbl_logo = EtiquetaLogoResponsiva("grande")
+        alto_logo = min(lbl_logo.alto_para_ancho(ANCHO_UTIL_LOGO), 190)
+        lbl_logo.setFixedHeight(alto_logo)
         flayout.addWidget(lbl_logo)
 
         lbl_sub = QLabel("Sistema de gestión integrada")

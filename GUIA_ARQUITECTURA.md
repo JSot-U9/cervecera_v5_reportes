@@ -222,7 +222,6 @@ responsabilidad cada uno:
 | `tutorial_data.py`        | **Contenido declarativo**: la lista de pasos de cada tutorial, el guardado del progreso del usuario y los textos de ayuda contextual. Agregar o cambiar un tutorial es, casi siempre, solo tocar este archivo. |
 | `tutorial_overlay.py`     | **Motor visual**: oscurece la pantalla alrededor del control que se explica y muestra la tarjeta con el texto. No sabe nada de "Compras" ni de "roles" — solo sabe resaltar un widget de Tkinter. |
 | `tutorial.py`             | **Orquestador**: recorre los pasos de un tutorial con el overlay, maneja la navegación entre módulos, y contiene el panel «❓ Ayuda y tutorial». |
-| `tutorial_practice.py`    | **Modo práctico**: el ejemplo de "aprender haciendo" en Compras — un checklist que detecta acciones reales del usuario sobre el formulario real. |
 
 **¿Cómo sabe el tutorial qué widget resaltar?** Cada vista (`VistaCompras`,
 `VistaInventario`, etc.) expone un diccionario `self.tutorial_targets`

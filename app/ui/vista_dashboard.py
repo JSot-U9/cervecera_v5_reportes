@@ -16,7 +16,7 @@ enlaza desde aquí, no se recalcula en cada visita.
 
 from datetime import date
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QLabel,
     QScrollArea, QPushButton,
@@ -187,13 +187,37 @@ class VistaDashboard(QWidget):
             if sub_layout is not None:
                 self._limpiar_layout(sub_layout)
 
-    # ── Carga diferida (lazy rendering) de tarjetas "Requiere tu atención" ──
-    _BLOQUE_CARGA = 4
-    _UMBRAL_PIXELS = 120
+    # ── Render progresivo de las tarjetas "Requiere tu atención" ──
+    #
+    # La versión anterior mostraba 4 tarjetas y cargaba más solo cuando
+    # el usuario hacía scroll hasta el final del área visible. Como el
+    # bloque de 4 casi nunca llegaba a desbordar la pantalla, ese evento
+    # no se disparaba nunca y en la práctica el Dashboard mostraba
+    # únicamente los 4 elementos más prioritarios, escondiendo el resto
+    # de los productos escasos.
+    #
+    # Ahora se muestran TODOS, pero repartidos en tandas encadenadas con
+    # QTimer: cada tanda se crea en un ciclo distinto del bucle de
+    # eventos, así que la ventana nunca se congela aunque haya cientos
+    # de alertas. Sobre los primeros _VISIBLES_INICIAL se coloca además
+    # un botón "Ver los N restantes" para no abrumar de entrada.
+    _BLOQUE_CARGA = 25
+    _VISIBLES_INICIAL = 8
+
+    def _cancelar_carga_progresiva(self):
+        """Invalida cualquier cadena de QTimer pendiente de una llamada
+        anterior a _repintar_atencion. Necesario porque F5 (refrescar) o
+        una nueva navegación pueden disparar un repintado mientras la
+        tanda anterior todavía se estaba completando en segundo plano;
+        sin esto, las tarjetas viejas seguirían apareciendo por encima
+        del contenido nuevo."""
+        self._generacion_atencion = getattr(self, "_generacion_atencion", 0) + 1
+        self._pendientes_data = []
+        self._pendientes_index = 0
 
     def _repintar_atencion(self, bajos: list, por_vencer: list):
-        # Preparar lista ligera de datos en lugar de crear todas las tarjetas
         self._limpiar_layout(self._layout_atencion)
+        self._cancelar_carga_progresiva()
         hoy = date.today()
 
         pendientes = []  # lista de dicts con la info necesaria para crear la tarjeta
@@ -208,7 +232,13 @@ class VistaDashboard(QWidget):
                 "titulo": f"{b['nombre']} — stock bajo el mínimo",
                 "descripcion": descripcion,
                 "severidad": severidad,
-                "accion": ("inventario",),
+                "texto_boton": "Ver en stock",
+                # tipo/texto_filtro: para poder llevar al usuario directo a la
+                # fila exacta en Inventario, no solo abrir el módulo genérico.
+                # "stock" abre la pestaña "Stock Actual", que es donde se
+                # comprueba la cantidad disponible frente al mínimo.
+                "tipo": "stock",
+                "texto_filtro": b["codigo"] or b["nombre"],
             })
 
         for lote in por_vencer:
@@ -224,7 +254,9 @@ class VistaDashboard(QWidget):
                 "titulo": f"{lote['nombre']} — lote {lote['numero']} próximo a vencer",
                 "descripcion": descripcion,
                 "severidad": severidad,
-                "accion": ("inventario",),
+                "texto_boton": "Ver lote",
+                "tipo": "lote",
+                "texto_filtro": lote["numero"],
             })
 
         if not pendientes:
@@ -238,47 +270,81 @@ class VistaDashboard(QWidget):
         # Priorizar
         pendientes.sort(key=lambda d: _PRIORIDAD_SEVERIDAD.get(d.get("severidad"), 9))
 
-        # Estado para la carga incremental
         self._pendientes_data = pendientes
-        self._pendientes_index = 0
+        generacion = self._generacion_atencion
 
-        # Conectar el scroll una sola vez
-        if not getattr(self, "_scroll_conectado", False):
-            sb = self._scroll.verticalScrollBar()
-            sb.valueChanged.connect(self._on_scroll_val_changed)
-            self._scroll_conectado = True
+        # Primera tanda: se muestra de inmediato para que el Dashboard
+        # se sienta instantáneo (antes esto era, sin querer, TODO lo que
+        # el usuario llegaba a ver — sección A.7 del reporte de bugs).
+        visibles_inicial = min(self._VISIBLES_INICIAL, len(pendientes))
+        self._agregar_tarjetas(pendientes[:visibles_inicial])
+        self._pendientes_index = visibles_inicial
 
-        # Cargar el primer bloque inmediatamente para mostrar algo rápido
-        self._cargar_siguiente_bloque()
+        restantes = len(pendientes) - visibles_inicial
+        if restantes > 0:
+            self._mostrar_boton_ver_mas(restantes, generacion)
+
+    def _agregar_tarjetas(self, datos: list):
+        for data in datos:
+            self._layout_atencion.addWidget(self._crear_tarjeta_desde_data(data))
+
+    def _mostrar_boton_ver_mas(self, restantes: int, generacion: int):
+        self._quitar_boton_ver_mas()
+        boton = QPushButton(f"Ver los {restantes} restantes")
+        poner_clase(boton, "accionSecundaria")
+        boton.clicked.connect(lambda: self._iniciar_carga_completa(generacion))
+        self._layout_atencion.addWidget(boton)
+        self._btn_ver_mas = boton
+
+    def _quitar_boton_ver_mas(self):
+        boton = getattr(self, "_btn_ver_mas", None)
+        if boton is not None:
+            self._layout_atencion.removeWidget(boton)
+            boton.deleteLater()
+            self._btn_ver_mas = None
+
+    def _iniciar_carga_completa(self, generacion: int):
+        """Muestra TODAS las alertas restantes, en tandas encadenadas
+        con QTimer.singleShot(0, ...): cada tanda se crea en un ciclo
+        distinto del bucle de eventos, así que aunque haya cientos de
+        productos escasos la ventana nunca deja de responder mientras
+        se construyen los widgets."""
+        self._quitar_boton_ver_mas()
+        self._cargar_siguiente_bloque(generacion)
+
+    def _cargar_siguiente_bloque(self, generacion: int):
+        # Si mientras tanto se disparó otro refrescar() (F5, cambio de
+        # rol, nueva navegación), esta cadena quedó obsoleta: se aborta
+        # en vez de seguir agregando tarjetas sobre un layout que ya se
+        # limpió para otro contenido.
+        if generacion != self._generacion_atencion:
+            return
+        inicio = self._pendientes_index
+        fin = min(inicio + self._BLOQUE_CARGA, len(self._pendientes_data))
+        self._agregar_tarjetas(self._pendientes_data[inicio:fin])
+        self._pendientes_index = fin
+        if fin < len(self._pendientes_data):
+            QTimer.singleShot(0, lambda: self._cargar_siguiente_bloque(generacion))
 
     def _crear_tarjeta_desde_data(self, data: dict):
         return TarjetaAccion(
             titulo=data["titulo"],
             descripcion=data["descripcion"],
             severidad=data.get("severidad", "info"),
-            texto_boton="Ver",
-            al_clic=lambda: self._navegar("inventario"),
+            texto_boton=data.get("texto_boton", "Ver"),
+            al_clic=lambda tipo=data["tipo"], texto=data["texto_filtro"]:
+                self._ir_al_recurso(tipo, texto),
         )
 
-    def _cargar_siguiente_bloque(self):
-        if not getattr(self, "_pendientes_data", None):
-            return
-        inicio = self._pendientes_index
-        fin = min(inicio + self._BLOQUE_CARGA, len(self._pendientes_data))
-        for i in range(inicio, fin):
-            data = self._pendientes_data[i]
-            tarjeta = self._crear_tarjeta_desde_data(data)
-            self._layout_atencion.addWidget(tarjeta)
-        self._pendientes_index = fin
-
-    def _on_scroll_val_changed(self, value: int):
-        # Cargar más tarjetas cuando el usuario se acerca al final del área visible
-        sb = self._scroll.verticalScrollBar()
-        viewport_h = self._scroll.viewport().height()
-        # Si el scroll está cerca del final, cargar otro bloque
-        if value + viewport_h + self._UMBRAL_PIXELS >= sb.maximum():
-            if getattr(self, "_pendientes_data", None) and self._pendientes_index < len(self._pendientes_data):
-                self._cargar_siguiente_bloque()
+    def _ir_al_recurso(self, tipo: str, texto_filtro: str):
+        """Navega a Inventario y deja la tabla correspondiente filtrada
+        exactamente por el producto/lote de la tarjeta en la que se hizo
+        clic, en lugar de solo abrir el módulo en su estado por defecto."""
+        ventana = self.window()
+        if hasattr(ventana, "ir_a_resultado"):
+            ventana.ir_a_resultado({"tipo": tipo, "texto_filtro": texto_filtro})
+        else:
+            self._navegar("inventario")
 
     # ── Datos ─────────────────────────────────────────────────────────
     def refrescar(self):
@@ -323,55 +389,3 @@ class VistaDashboard(QWidget):
         self.kpi_capital_inicial.actualizar(f"S/ {capital_inicial:,.2f}")
 
         self._repintar_atencion(bajos, por_vencer)
-
-    def _repintar_atencion(self, bajos: list, por_vencer: list):
-        self._limpiar_layout(self._layout_atencion)
-        hoy = date.today()
-
-        # (severidad, TarjetaAccion) para poder priorizar lo crítico arriba
-        pendientes = []
-
-        for b in bajos:
-            severidad = "critico" if b["stock"] <= 0 else "riesgo"
-            descripcion = (
-                f"Stock actual: {b['stock']:.1f} {b['unidad']}  "
-                f"(mínimo requerido: {b['minimo']})."
-            )
-            tarjeta = TarjetaAccion(
-                titulo=f"{b['nombre']} — stock bajo el mínimo",
-                descripcion=descripcion,
-                severidad=severidad,
-                texto_boton="Revisar",
-                al_clic=lambda: self._navegar("inventario"),
-            )
-            pendientes.append((severidad, tarjeta))
-
-        for lote in por_vencer:
-            fv = lote["fecha_vencimiento"]
-            dias_restantes = (fv - hoy).days if fv else None
-            critico = dias_restantes is not None and dias_restantes <= 7
-            severidad = "critico" if critico else "atencion"
-            if fv:
-                descripcion = f"Vence el {fv.strftime('%d/%m/%Y')} ({dias_restantes} días)."
-            else:
-                descripcion = "Fecha de vencimiento no registrada."
-            tarjeta = TarjetaAccion(
-                titulo=f"{lote['nombre']} — lote {lote['numero']} próximo a vencer",
-                descripcion=descripcion,
-                severidad=severidad,
-                texto_boton="Ver lote",
-                al_clic=lambda: self._navegar("inventario"),
-            )
-            pendientes.append((severidad, tarjeta))
-
-        if not pendientes:
-            self._layout_atencion.addWidget(EstadoVacio(
-                "✅", "Todo en orden",
-                "No hay productos con stock bajo el mínimo ni lotes próximos a vencer "
-                "en los próximos 30 días.",
-            ))
-            return
-
-        pendientes.sort(key=lambda par: _PRIORIDAD_SEVERIDAD.get(par[0], 9))
-        for _severidad, tarjeta in pendientes:
-            self._layout_atencion.addWidget(tarjeta)

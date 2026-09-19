@@ -18,6 +18,7 @@ from app.seguridad import puede, modulos_visibles
 from app.logica_compras import (
     registrar_compra, listar_ordenes_compra, listar_proveedores_activos,
     crear_proveedor, actualizar_proveedor,
+    productos_ofrecidos_por_proveedor, ultimos_precios_por_proveedor,
 )
 from app.ui.widgets import (
     EncabezadoModulo, BarraBusqueda, TablaDatos, SeccionFormulario, MensajeEstado,
@@ -306,15 +307,12 @@ class VentanaNuevaOrden(QDialog):
 
         with nueva_sesion() as db:
             self.proveedores = listar_proveedores_activos(db)
-            self.productos = db.query(Producto).filter_by(tipo="Insumo", activo=True).all()
-            self._ultimos_precios = {}
-            for p in self.productos:
-                lote = (db.query(LoteInventario)
-                        .filter_by(producto_id=p.id)
-                        .order_by(LoteInventario.id.desc())
-                        .first())
-                if lote and lote.costo_unitario:
-                    self._ultimos_precios[p.id] = lote.costo_unitario
+            # El catálogo de productos y los precios YA NO son fijos ni
+            # globales: dependen del proveedor elegido (ver
+            # _al_cambiar_proveedor). Se dejan vacíos aquí; se llenan en
+            # cuanto el usuario selecciona un proveedor.
+            self.productos: list[Producto] = []
+            self._ultimos_precios: dict = {}
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -353,6 +351,7 @@ class VentanaNuevaOrden(QDialog):
         for p in self.proveedores:
             self.combo_proveedor.addItem(f"{p.id} — {p.razon_social}", p.id)
         self.combo_proveedor.setCurrentIndex(-1)
+        self.combo_proveedor.currentIndexChanged.connect(self._al_cambiar_proveedor)
         spl.addWidget(self.combo_proveedor)
 
         # ── Agregar producto ────────────────────────────────────
@@ -364,11 +363,21 @@ class VentanaNuevaOrden(QDialog):
         lbl_prod.setFont(fuente(9, negrita=True))
         spr.addWidget(lbl_prod)
         self.combo_producto = QComboBox()
-        for p in self.productos:
-            self.combo_producto.addItem(f"{p.id} — {p.nombre}", p.id)
-        self.combo_producto.setCurrentIndex(-1)
+        self.combo_producto.setPlaceholderText("Elige primero un proveedor…")
+        self.combo_producto.setEnabled(False)
         self.combo_producto.currentIndexChanged.connect(self._autocompletar_precio)
         spr.addWidget(self.combo_producto)
+        # Aclara si la lista de productos es el catálogo real de este
+        # proveedor (según su historial de compras) o solo un respaldo
+        # porque todavía no le hemos comprado nada — antes esto no se
+        # distinguía en ningún lado y el formulario daba a entender que
+        # cualquier proveedor vende cualquier insumo.
+        self.lbl_catalogo_hint = QLabel("")
+        self.lbl_catalogo_hint.setStyleSheet(f"color: {COLOR_TEXTO_SECUNDARIO};")
+        self.lbl_catalogo_hint.setFont(fuente(8, cursiva=True))
+        self.lbl_catalogo_hint.setWordWrap(True)
+        spr.addWidget(self.lbl_catalogo_hint)
+
 
         f_nums = QHBoxLayout()
         spr.addLayout(f_nums)
@@ -448,16 +457,53 @@ class VentanaNuevaOrden(QDialog):
         centrar_ventana(self, 780, 640)
 
         if self._producto_preseleccionado is not None:
+            # El producto viene de una recomendación del Centro de
+            # Inteligencia, sin proveedor todavía: se deja pendiente y
+            # se aplica en cuanto el usuario elige uno (ver
+            # _al_cambiar_proveedor), en vez de forzarlo contra un
+            # catálogo que todavía no se cargó.
+            self._msg.mostrar(
+                "Cantidad prellenada desde una recomendación del Centro de Inteligencia. "
+                "Elige el proveedor y confirma el producto y el precio antes de agregarlo.",
+                tipo="info", duracion_ms=8000,
+            )
+
+    def _al_cambiar_proveedor(self):
+        proveedor_id = self.combo_proveedor.currentData()
+        self.combo_producto.clear()
+        if proveedor_id is None:
+            self.combo_producto.setEnabled(False)
+            self.combo_producto.setPlaceholderText("Elige primero un proveedor…")
+            self.lbl_catalogo_hint.setText("")
+            self._ultimos_precios = {}
+            return
+
+        with nueva_sesion() as db:
+            self.productos, es_catalogo_real = productos_ofrecidos_por_proveedor(db, proveedor_id)
+            self._ultimos_precios = ultimos_precios_por_proveedor(db, proveedor_id)
+
+        self.combo_producto.setEnabled(bool(self.productos))
+        for p in self.productos:
+            self.combo_producto.addItem(f"{p.id} — {p.nombre}", p.id)
+        self.combo_producto.setCurrentIndex(-1)
+
+        if not self.productos:
+            self.lbl_catalogo_hint.setText(
+                "⚠ No hay insumos activos registrados en el sistema.")
+        elif es_catalogo_real:
+            self.lbl_catalogo_hint.setText(
+                f"✓ {len(self.productos)} producto(s) que este proveedor ha vendido antes.")
+        else:
+            self.lbl_catalogo_hint.setText(
+                "ℹ Este proveedor todavía no tiene compras registradas — se muestra el "
+                "catálogo completo de insumos como referencia.")
+
+        if self._producto_preseleccionado is not None:
             idx = self.combo_producto.findData(self._producto_preseleccionado)
             if idx >= 0:
                 self.combo_producto.setCurrentIndex(idx)
             if self._cantidad_sugerida:
                 self.entry_cantidad.setText(f"{self._cantidad_sugerida:.2f}")
-            self._msg.mostrar(
-                "Producto y cantidad prellenados desde una recomendación del Centro de Inteligencia. "
-                "Revisa el proveedor y el precio antes de agregarlo a la orden.",
-                tipo="info", duracion_ms=8000,
-            )
 
     def _autocompletar_precio(self):
         producto_id = self.combo_producto.currentData()

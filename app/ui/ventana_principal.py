@@ -12,7 +12,7 @@ from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QFrame, QVBoxLayout, QHBoxLayout, QLabel,
-    QPushButton, QStackedWidget,
+    QPushButton, QStackedWidget, QScrollArea,
 )
 
 from app.sesion import sesion_actual
@@ -20,7 +20,7 @@ from app.seguridad import modulos_visibles
 from app.logica_autenticacion import cerrar_sesion
 from app.logica_configuracion import obtener_parametro
 from app.ui.estilos import fuente, poner_clase
-from app.ui.logo import cargar_logo
+from app.ui.logo import cargar_logo, EtiquetaLogoResponsiva
 from app.ui.widgets import BarraEstado, ejecutar_con_carga
 from app.ui.header import HeaderSuperior
 from app.ui.tutorial import abrir_centro_ayuda, tal_vez_iniciar_tutorial_general
@@ -34,7 +34,6 @@ from app.ui.vista_produccion import VistaProduccion
 from app.ui.vista_ventas import VistaVentas
 from app.ui.vista_costos import VistaCostos
 from app.ui.vista_admin import VistaAdmin
-from app.ui.vista_prediccion import VistaPrediccion
 from app.ui.vista_centro_inteligencia import VistaCentroInteligencia
 
 # (clave, icono, etiqueta, clase_de_vista, sección_de_sidebar)
@@ -46,9 +45,11 @@ DEFINICION_MODULOS = [
     ("compras",             "🛒", "Compras",                  VistaCompras,               "OPERACIÓN"),
     ("inventario",          "📦", "Inventario",               VistaInventario,            "OPERACIÓN"),
     ("produccion",          "🍺", "Producción",               VistaProduccion,            "OPERACIÓN"),
-    ("ventas",              "💰", "Ventas",                   VistaVentas,                "OPERACIÓN"),
-    ("costos",              "📊", "Costos",                   VistaCostos,                "ANÁLISIS"),
-    ("prediccion",          "🔮", "Predicción Demanda",       VistaPrediccion,            "ANÁLISIS"),
+    ("ventas",              "💰", "Realizar ventas",         VistaVentas,                "OPERACIÓN"),
+    ("costos",              "📊", "Reportes de ventas",      VistaCostos,                "ANÁLISIS"),
+    # "prediccion" ya NO es un módulo aparte del sidebar (sección G del
+    # reporte de bugs): su vista completa ahora vive como una pestaña
+    # dentro de Centro de Inteligencia (ver vista_centro_inteligencia.py).
     ("centro_inteligencia", "🧠", "Centro de Inteligencia",   VistaCentroInteligencia,    "INTELIGENCIA"),
     ("admin",               "⚙️", "Administración",           VistaAdmin,                 "ADMINISTRACIÓN"),
 ]
@@ -59,9 +60,8 @@ _TITULOS_MODULO = {
     "compras":              ("Compras", ["Operación", "Compras"]),
     "inventario":           ("Inventario", ["Operación", "Inventario"]),
     "produccion":           ("Producción", ["Operación", "Producción"]),
-    "ventas":               ("Ventas", ["Operación", "Ventas"]),
-    "costos":               ("Costos", ["Análisis", "Costos"]),
-    "prediccion":           ("Predicción de Demanda", ["Análisis", "Predicción Demanda"]),
+    "ventas":               ("Realizar ventas", ["Operación", "Realizar ventas"]),
+    "costos":               ("Reportes de ventas", ["Análisis", "Reportes de ventas"]),
     "centro_inteligencia":  ("Centro de Inteligencia", ["Inteligencia", "Centro de Inteligencia"]),
     "admin":                ("Administración", ["Administración"]),
 }
@@ -71,6 +71,10 @@ _TITULOS_MODULO = {
 #   tipo -> (modulo, índice de pestaña o None, atributo de TablaDatos)
 _MAPA_RESULTADOS_BUSQUEDA = {
     "producto":   ("inventario", 3, "tabla_catalogo"),
+    # "stock": alertas de stock bajo del Dashboard. Van a la pestaña
+    # "Stock Actual" (índice 0) y no al catálogo, porque lo que el
+    # usuario quiere comprobar ahí es justamente la cantidad disponible.
+    "stock":      ("inventario", 0, "tabla_stock"),
     "lote":       ("inventario", 1, "tabla_lotes"),
     "produccion": ("produccion", None, "tabla"),
     "compra":     ("compras", 0, "tabla_ordenes"),
@@ -150,7 +154,39 @@ class VentanaPrincipal(QMainWindow):
         self._sidebar = sidebar
         layout_padre.addWidget(sidebar)
 
-        sl = QVBoxLayout(sidebar)
+        # El sidebar tiene MUCHOS elementos de alto fijo apilados (la
+        # tarjeta del logo, cada botón de menú, la info del usuario,
+        # los botones de abajo). Si la ventana se hace más baja de lo
+        # que todo eso necesita, Qt no puede simplemente "inventar"
+        # espacio — y en vez de recortar limpio, el motor de layout
+        # termina comprimiendo el conjunto de forma despareja, lo que
+        # hacía que el nombre de la empresa se dibujara ENCIMA de la
+        # tarjeta del logo (el bug reportado: se veía bien con la
+        # ventana grande, pero se corrompía al achicarla). La solución
+        # correcta no es adivinar un tamaño más chico para el logo —
+        # es dejar que el sidebar tenga scroll cuando de verdad no
+        # entra todo, igual que cualquier menú de navegación real.
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        scroll.setStyleSheet(
+            f"QScrollArea {{ background-color: {COLOR_SIDEBAR}; border: none; }}"
+            f"QScrollArea > QWidget > QWidget {{ background-color: {COLOR_SIDEBAR}; }}"
+            f"QScrollBar:vertical {{ background-color: {COLOR_SIDEBAR}; width: 8px; margin: 0; }}"
+            f"QScrollBar::handle:vertical {{ background-color: #3D4F28; border-radius: 4px; min-height: 24px; }}"
+            f"QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0px; }}"
+        )
+        layout_sidebar_externo = QVBoxLayout(sidebar)
+        layout_sidebar_externo.setContentsMargins(0, 0, 0, 0)
+        layout_sidebar_externo.addWidget(scroll)
+        self._scroll_sidebar = scroll
+
+        contenido = QWidget()
+        scroll.setWidget(contenido)
+
+        sl = QVBoxLayout(contenido)
         sl.setContentsMargins(12, 12, 12, 10)
         sl.setSpacing(2)
 
@@ -158,9 +194,25 @@ class VentanaPrincipal(QMainWindow):
         fondo(tarjeta_logo, COLOR_TARJETA, "border-radius: 6px;")
         tl = QVBoxLayout(tarjeta_logo)
         tl.setContentsMargins(10, 10, 10, 10)
-        lbl_logo = QLabel()
-        lbl_logo.setPixmap(cargar_logo("chico"))
-        lbl_logo.setAlignment(Qt.AlignCenter)
+        # Espacio real disponible: 230 (sidebar) − 24 (márgenes del
+        # sidebar) − 20 (márgenes de la tarjeta) = 186 px.
+        #
+        # EtiquetaLogoResponsiva (y no un QPixmap escalado una sola
+        # vez): reescala el logo cada vez que SU espacio cambia, en
+        # vez de fijar una escala calculada aquí una única vez. Así,
+        # si el sidebar alguna vez cambia de ancho (otro DPI, un
+        # sidebar colapsable a futuro), el logo se sigue ajustando
+        # solo y nunca vuelve a quedar recortado contra el nombre de
+        # la empresa que tiene debajo.
+        ANCHO_UTIL_LOGO = 186
+        lbl_logo = EtiquetaLogoResponsiva("chico")
+        # El ANCHO lo decide el layout (política Expanding, por
+        # defecto en QLabel); solo se fija el ALTO del contenedor,
+        # calculado a partir del ancho útil actual para reservarle un
+        # espacio consistente sin necesidad de adivinar un tamaño
+        # exacto de pixmap.
+        alto_logo = lbl_logo.alto_para_ancho(ANCHO_UTIL_LOGO)
+        tarjeta_logo.setFixedHeight(alto_logo + 20)
         tl.addWidget(lbl_logo)
         sl.addWidget(tarjeta_logo)
         sl.addSpacing(4)
@@ -265,7 +317,25 @@ class VentanaPrincipal(QMainWindow):
         self._actualizar_notificaciones()
 
     # ── Búsqueda global (header) ─────────────────────────────────────
+    def ir_a_resultado(self, resultado: dict):
+        """API pública: navega al módulo correspondiente y deja su tabla
+        filtrada por el recurso indicado (dict con 'tipo' y 'texto_filtro').
+        La usa tanto el buscador global del header como las tarjetas de
+        "Requiere tu atención" del Dashboard, para no duplicar el mapeo
+        tipo -> (módulo, pestaña, tabla)."""
+        self._ir_a_resultado_busqueda(resultado)
+
     def _ir_a_resultado_busqueda(self, resultado: dict):
+        """Lleva al usuario hasta el recurso exacto SIN esconder el resto.
+
+        Antes esto llamaba a `tabla.filtrar(texto)`, lo que dejaba la
+        tabla reducida a una sola fila: no se veía en qué posición
+        estaba el lote respecto a los demás y no había forma evidente de
+        volver a la tabla completa. Ahora se resalta y se hace scroll
+        hasta la fila, dejando todo el contexto a la vista. Solo si el
+        recurso no aparece entre las filas cargadas se recurre al filtro
+        (y se avisa en la barra de estado cómo deshacerlo).
+        """
         tipo = resultado.get("tipo")
         destino = _MAPA_RESULTADOS_BUSQUEDA.get(tipo)
         if not destino:
@@ -277,21 +347,61 @@ class VentanaPrincipal(QMainWindow):
         vista = self._vistas[modulo]
         if indice_pestana is not None and hasattr(vista, "notebook"):
             vista.notebook.setCurrentIndex(indice_pestana)
+
         tabla = getattr(vista, atributo_tabla, None)
-        if tabla is not None and hasattr(tabla, "filtrar"):
-            tabla.filtrar(resultado.get("texto_filtro", ""))
+        texto = resultado.get("texto_filtro", "")
+        if tabla is None or not texto:
+            return
+
+        if hasattr(tabla, "resaltar") and tabla.resaltar(texto):
+            return
+
+        # Plan B: no está entre las filas visibles (p. ej. la pestaña
+        # muestra solo lotes disponibles). Se filtra, pero avisando.
+        if hasattr(tabla, "filtrar"):
+            tabla.filtrar(texto)
+            self._avisar_filtro_aplicado(vista, texto, tabla)
+
+    def _avisar_filtro_aplicado(self, vista, texto: str, tabla):
+        """Cuando hay que filtrar de verdad, el usuario tiene que poder
+        volver a la tabla completa de un clic."""
+        from PySide6.QtWidgets import QMessageBox
+        caja = QMessageBox(self)
+        caja.setWindowTitle("Vista filtrada")
+        caja.setIcon(QMessageBox.Information)
+        caja.setText(
+            f"La tabla se filtró por «{texto}» porque ese registro no aparecía "
+            f"en la lista completa que estaba cargada."
+        )
+        boton_ver_todo = caja.addButton("Ver tabla completa", QMessageBox.AcceptRole)
+        caja.addButton("Mantener el filtro", QMessageBox.RejectRole)
+        caja.exec()
+        if caja.clickedButton() is boton_ver_todo:
+            tabla.filtrar("")
 
     # ── Notificaciones (header) ──────────────────────────────────────
     def _actualizar_notificaciones(self):
         """Cuenta rápida y barata (sin IA) de asuntos que requieren
-        atención, para el badge de la campana del header."""
+        atención, para el badge de la campana del header. Debe reflejar
+        exactamente lo mismo que ve el usuario en la sección "Requiere tu
+        atención" del Dashboard (misma fuente de datos)."""
         try:
             from app.basedatos import nueva_sesion
             with nueva_sesion() as db:
                 cantidad = len(productos_bajo_minimo(db)) + len(lotes_proximos_a_vencer(db, dias=30))
             self._header.establecer_notificaciones(cantidad)
         except Exception:
-            pass
+            # Antes este error se silenciaba por completo (`except: pass`),
+            # lo que podía dejar el número de la campana "congelado" en un
+            # valor viejo e incorrecto para siempre si la consulta empezaba
+            # a fallar (p. ej. con datasets grandes), sin ninguna pista de
+            # que algo estaba mal. Se deja constancia en el log y se limpia
+            # el badge en vez de mostrar una cifra que ya no es real.
+            import logging
+            logging.getLogger(__name__).exception(
+                "No se pudo calcular el número de notificaciones pendientes."
+            )
+            self._header.establecer_notificaciones(0)
 
     # ── API pública ───────────────────────────────────────────────
     def navegar(self, clave: str):
@@ -304,7 +414,15 @@ class VentanaPrincipal(QMainWindow):
         return self._vistas.get(self._clave_activa)
 
     def boton_menu(self, clave: str):
-        return self._botones_menu.get(clave)
+        boton = self._botones_menu.get(clave)
+        # Si el sidebar tiene scroll activo (ventana baja, ver
+        # _crear_sidebar) y el tutorial va a resaltar un botón que
+        # está fuera del área visible, hay que desplazarlo a la vista
+        # primero — si no, el overlay terminaría señalando un botón
+        # que el usuario no puede ver.
+        if boton is not None and hasattr(self, "_scroll_sidebar"):
+            self._scroll_sidebar.ensureWidgetVisible(boton, 0, 40)
+        return boton
 
     def widget_sidebar(self):
         return self._sidebar

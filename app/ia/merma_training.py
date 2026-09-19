@@ -161,8 +161,21 @@ def modelo_disponible() -> bool:
     return RUTA_MODELO.exists() and RUTA_METADATA.exists()
 
 
+_cache_modelos: dict = {}  # {mtime_modelo: (modelo_xgb, modelo_baseline)}
+
+
 def cargar_modelos():
-    """Carga y devuelve (modelo_xgb, modelo_baseline) desde disco."""
+    """Carga y devuelve (modelo_xgb, modelo_baseline) desde disco.
+
+    Cacheado en memoria por el mismo motivo que en demanda_training.py:
+    reposicion.py llama predecir_merma() (y por lo tanto cargar_modelos())
+    una vez por cada receta activa, y sin caché eso implicaba releer y
+    deserializar el mismo archivo del modelo desde disco repetidamente.
+    """
     if not modelo_disponible():
         raise FileNotFoundError("No hay modelo de merma entrenado. Ejecuta el entrenamiento primero.")
-    return joblib.load(RUTA_MODELO), joblib.load(RUTA_BASELINE)
+    mtime = RUTA_MODELO.stat().st_mtime
+    if mtime not in _cache_modelos:
+        _cache_modelos.clear()
+        _cache_modelos[mtime] = (joblib.load(RUTA_MODELO), joblib.load(RUTA_BASELINE))
+    return _cache_modelos[mtime]

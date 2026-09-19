@@ -138,11 +138,36 @@ def ajustar_stock(db, lote_id: int, nueva_cantidad: float, motivo: str = "",
 
 
 def productos_bajo_minimo(db):
-    """Lista de productos cuyo stock actual está por debajo del mínimo configurado."""
+    """Lista de productos cuyo stock actual está por debajo del mínimo configurado.
+
+    Se resuelve con UNA sola consulta agregada en vez de recorrer los
+    productos uno por uno llamando a stock_total() (lo que disparaba
+    una consulta extra por producto: el clásico problema "N+1"). Con un
+    catálogo de varios cientos de productos esa versión tardaba
+    segundos, y como esta función alimenta tanto el Dashboard como el
+    contador de notificaciones y el motor de reposición, ese costo se
+    pagaba en cada navegación.
+    """
+    from sqlalchemy import func
+
+    # Stock disponible por producto, sumando solo lotes vigentes.
+    stock_por_producto = dict(
+        db.query(
+            LoteInventario.producto_id,
+            func.coalesce(func.sum(LoteInventario.cantidad_disponible), 0.0),
+        )
+        .filter(
+            LoteInventario.estado == "DISPONIBLE",
+            LoteInventario.cantidad_disponible > 0,
+        )
+        .group_by(LoteInventario.producto_id)
+        .all()
+    )
+
     resultado = []
     for producto in db.query(Producto).filter_by(activo=True).all():
-        stock = stock_total(db, producto.id)
-        if stock < producto.stock_minimo:
+        stock = float(stock_por_producto.get(producto.id, 0.0))
+        if stock < (producto.stock_minimo or 0.0):
             resultado.append({
                 "id": producto.id, "codigo": producto.codigo, "nombre": producto.nombre,
                 "stock": stock, "minimo": producto.stock_minimo,

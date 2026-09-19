@@ -189,8 +189,24 @@ def modelo_disponible() -> bool:
     return RUTA_MODELO.exists() and RUTA_METADATA.exists()
 
 
+_cache_modelos: dict = {}  # {mtime_modelo: (modelo_xgb, modelo_baseline)}
+
+
 def cargar_modelos():
-    """Carga y devuelve (modelo_xgb, modelo_baseline) desde disco."""
+    """Carga y devuelve (modelo_xgb, modelo_baseline) desde disco.
+
+    Se cachea en memoria por el resto del proceso: reposicion.py llama a
+    esta función una vez POR CADA receta activa al calcular las
+    recomendaciones de reposición, y sin caché eso significaba volver a
+    deserializar el mismo archivo XGBoost desde disco una y otra vez
+    (el motivo real de la demora al abrir esa pantalla). La clave es la
+    fecha de modificación del archivo, así que si se reentrena el modelo
+    (entrenar() sobreescribe RUTA_MODELO), el caché se invalida solo.
+    """
     if not modelo_disponible():
         raise FileNotFoundError("No hay modelo entrenado. Ejecuta el entrenamiento primero.")
-    return joblib.load(RUTA_MODELO), joblib.load(RUTA_BASELINE)
+    mtime = RUTA_MODELO.stat().st_mtime
+    if mtime not in _cache_modelos:
+        _cache_modelos.clear()
+        _cache_modelos[mtime] = (joblib.load(RUTA_MODELO), joblib.load(RUTA_BASELINE))
+    return _cache_modelos[mtime]

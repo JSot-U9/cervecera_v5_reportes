@@ -16,7 +16,7 @@ Componentes:
   - BarraEstado          : barra inferior con usuario/rol
 """
 
-from PySide6.QtCore import Qt, QTimer, Signal
+from PySide6.QtCore import Qt, QTimer, QThread, Signal
 from PySide6.QtGui import QScreen
 from PySide6.QtWidgets import (
     QWidget, QLabel, QFrame, QVBoxLayout, QHBoxLayout, QPushButton,
@@ -240,7 +240,67 @@ class TablaDatos(QTableWidget):
         self._tags_actuales = tags_por_fila or []
         self._repintar(filas, self._tags_actuales)
 
+    # ── Resaltado de una fila concreta ────────────────────────────
+    # A diferencia de filtrar(), esto NO esconde el resto de la tabla:
+    # deja ver el contexto completo y solo lleva al usuario hasta la
+    # fila exacta que estaba buscando (es lo que usan el buscador
+    # global y las tarjetas "Requiere tu atención" del Dashboard).
+    COLOR_RESALTADO = "#FFE8A3"
+    COLOR_RESALTADO_TEXTO = "#5C4200"
+
+    def resaltar(self, texto: str) -> bool:
+        """Selecciona y hace scroll hasta la primera fila que contenga
+        `texto`, dejando el resto de la tabla visible. Devuelve True si
+        encontró la fila."""
+        self.limpiar_resaltado()
+        texto = (texto or "").lower().strip()
+        if not texto:
+            return False
+
+        for fila in range(self.rowCount()):
+            for col in range(self.columnCount()):
+                item = self.item(fila, col)
+                if item is not None and texto in item.text().lower():
+                    self._pintar_resaltado(fila)
+                    self.selectRow(fila)
+                    self.setCurrentCell(fila, 0)
+                    self.scrollToItem(self.item(fila, 0),
+                                      QAbstractItemView.PositionAtCenter)
+                    self.setFocus()
+                    return True
+        return False
+
+    def _pintar_resaltado(self, fila: int):
+        colores_originales = []
+        for col in range(self.columnCount()):
+            item = self.item(fila, col)
+            if item is None:
+                colores_originales.append(None)
+                continue
+            colores_originales.append((item.background(), item.foreground()))
+            item.setBackground(QColor(self.COLOR_RESALTADO))
+            item.setForeground(QColor(self.COLOR_RESALTADO_TEXTO))
+        self._fila_resaltada = (fila, colores_originales)
+
+    def limpiar_resaltado(self):
+        datos = getattr(self, "_fila_resaltada", None)
+        if not datos:
+            return
+        fila, colores_originales = datos
+        if fila < self.rowCount():
+            for col, original in enumerate(colores_originales):
+                item = self.item(fila, col)
+                if item is None or original is None:
+                    continue
+                item.setBackground(original[0])
+                item.setForeground(original[1])
+        self._fila_resaltada = None
+
     def _repintar(self, filas, tags_por_fila):
+        # Repintar reconstruye los QTableWidgetItem, así que cualquier
+        # resaltado anterior deja de existir: se olvida la referencia
+        # para no intentar restaurar colores de items ya destruidos.
+        self._fila_resaltada = None
         self.setRowCount(0)
         self.setRowCount(len(filas))
         for i, fila in enumerate(filas):
@@ -315,6 +375,44 @@ def formatear_estado(estado_interno: str) -> str:
     if info:
         return f"{info[0]} {info[1]}"
     return estado_interno
+
+
+# ══════════════════════════════════════════════════════════════════
+#  BOTÓN DE AYUDA CONTEXTUAL
+# ══════════════════════════════════════════════════════════════════
+
+class BotonAyuda(QPushButton):
+    """Botón circular de ayuda contextual.
+
+    Usa el carácter ASCII "?" y NO el emoji "❓" a propósito: cuando el
+    sistema no tiene instalada una fuente con emojis en color (algo
+    habitual en Windows con fuentes recortadas y en muchos Linux), Qt
+    dibuja el glifo faltante como un recuadro vacío — que sobre el
+    fondo crema de los botones secundarios se veía como "una cuadrícula
+    amarilla sin ícono". Un "?" normal se ve siempre igual en todos
+    lados.
+    """
+
+    def __init__(self, titulo: str, texto: str, parent=None, tooltip: str = ""):
+        super().__init__("?", parent)
+        self._titulo = titulo
+        self._texto = texto
+        self.setFixedSize(26, 26)
+        self.setCursor(Qt.PointingHandCursor)
+        self.setToolTip(tooltip or f"¿Qué es esto? — {titulo}")
+        self.setFont(fuente(10, negrita=True))
+        # Estilo propio (no depende de la clase "secundario") para
+        # garantizar contraste entre el "?" y el fondo del botón.
+        self.setStyleSheet(
+            f"QPushButton {{ background-color: {COLOR_PRIMARIO}; color: white; "
+            f"border: none; border-radius: 13px; padding: 0px; font-weight: bold; }}"
+            f"QPushButton:hover {{ background-color: {COLOR_TEXTO}; color: white; }}"
+        )
+        self.clicked.connect(self._mostrar)
+
+    def _mostrar(self):
+        from PySide6.QtWidgets import QMessageBox
+        QMessageBox.information(self.window(), self._titulo, self._texto)
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -801,6 +899,65 @@ def ejecutar_con_carga(contenedor: QWidget, funcion, mensaje: str = "Cargando...
         return funcion()
     finally:
         overlay.ocultar()
+
+
+class _TareaEnHilo(QThread):
+    """Ejecuta una función pesada fuera del hilo de la interfaz."""
+
+    finalizado = Signal(object, object)   # (resultado, excepción)
+
+    def __init__(self, funcion, parent=None):
+        super().__init__(parent)
+        self._funcion = funcion
+
+    def run(self):
+        try:
+            self.finalizado.emit(self._funcion(), None)
+        except Exception as error:      # noqa: BLE001 — se reenvía al llamador
+            self.finalizado.emit(None, error)
+
+
+def ejecutar_en_hilo(contenedor: QWidget, funcion, al_terminar,
+                     mensaje: str = "Cargando...", submensaje: str = "",
+                     icono: str = "⏳"):
+    """Igual que `ejecutar_con_carga`, pero SIN congelar la ventana.
+
+    `funcion` corre en un hilo aparte mientras el overlay se anima de
+    verdad; cuando termina se llama a `al_terminar(resultado, error)`
+    ya de vuelta en el hilo de la interfaz (Qt entrega la señal ahí),
+    así que ese callback puede tocar widgets con total seguridad.
+
+    Es lo que usan los cálculos de IA del Centro de Inteligencia: antes
+    se ejecutaban de forma síncrona y la ventana quedaba bloqueada unos
+    5 segundos cada vez que se entraba al módulo.
+
+    Importante: `funcion` NO debe tocar widgets — solo calcular y
+    devolver datos. Las consultas a SQLite son seguras porque el engine
+    se crea con `check_same_thread=False` (ver app/basedatos.py) y cada
+    llamada abre su propia sesión.
+    """
+    overlay = getattr(contenedor, "_indicador_carga", None)
+    if overlay is None or overlay.parentWidget() is not contenedor:
+        overlay = IndicadorCarga(contenedor)
+        contenedor._indicador_carga = overlay
+    overlay.establecer_texto(mensaje, submensaje, icono)
+    overlay.mostrar()
+
+    tarea = _TareaEnHilo(funcion, contenedor)
+
+    def _al_finalizar(resultado, error):
+        overlay.ocultar()
+        # Se suelta la referencia para que el QThread pueda recolectarse.
+        if getattr(contenedor, "_tarea_en_curso", None) is tarea:
+            contenedor._tarea_en_curso = None
+        al_terminar(resultado, error)
+
+    tarea.finalizado.connect(_al_finalizar)
+    # Sin guardar la referencia, Python podría recolectar el QThread
+    # mientras sigue corriendo y la app se caería.
+    contenedor._tarea_en_curso = tarea
+    tarea.start()
+    return tarea
 
 
 class BarraEstado(QFrame):

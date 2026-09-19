@@ -37,13 +37,14 @@ from app.ui.estilos import (
 )
 from app.ui.widgets import (
     EncabezadoModulo, TarjetaKPI, MensajeEstado, TablaDatos, SeccionFormulario,
-    ejecutar_con_carga,
+    ejecutar_con_carga, ejecutar_en_hilo,
 )
 
 from app.ia import reposicion as motor_reposicion
 from app.ia.merma_prediction import predecir_merma, listar_recetas_para_prediccion
 from app.ia.demanda_data import listar_productos_con_ventas, diagnostico_historial
 from app.ia.demanda_prediction import predecir_demanda
+from app.ui.vista_prediccion import VistaPrediccion
 
 
 _PRIORIDAD_TAG = {"ALTA": "alerta", "MEDIA": "advertencia", "BAJA": "normal"}
@@ -54,6 +55,11 @@ class VistaCentroInteligencia(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._recomendaciones_actuales: list[dict] = []
+        # Diccionario que el sistema de tutorial usa para resaltar
+        # controles reales de esta vista (ver tutorial_data.py, sección
+        # I.3 del reporte de bugs: antes no existía ningún tutorial para
+        # "Centro de Inteligencia" ni "Predicción de demanda").
+        self.tutorial_targets: dict = {}
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -82,14 +88,40 @@ class VistaCentroInteligencia(QWidget):
         for k in (self.kpi_riesgo, self.kpi_reponer, self.kpi_merma_prom, self.kpi_productos_pronosticados):
             fila_kpi.addWidget(k)
         cuerpo.addLayout(fila_kpi)
+        self.tutorial_targets["kpi_riesgo"] = self.kpi_riesgo
 
         # ── Pestañas ──────────────────────────────────────────
         self.tabs = QTabWidget()
         cuerpo.addWidget(self.tabs, stretch=1)
+        self.tutorial_targets["tabs"] = self.tabs
+        # Alias para que el motor de tutorial (tutorial.py:_seleccionar_tab,
+        # que busca un atributo "notebook" con la misma API de QTabWidget
+        # usada por las demás vistas con pestañas) pueda cambiar de
+        # pestaña aquí también sin tener que aprender un nombre distinto.
+        self.notebook = self.tabs
 
         self.tabs.addTab(self._construir_tab_reposicion(), "📦  Reposición inteligente")
         self.tabs.addTab(self._construir_tab_merma(), "🍺  Predicción de merma")
-        self.tabs.addTab(self._construir_tab_demanda(), "🔮  Demanda prevista")
+        self.tabs.addTab(self._construir_tab_demanda(), "🔮  Demanda prevista (resumen)")
+        # Sección G del reporte de bugs: "Predicción Demanda" ya no es un
+        # módulo aparte del menú lateral — su vista completa (por
+        # producto, con gráfico e historial) vive aquí como una pestaña
+        # más, junto al resumen rápido multi-producto de arriba.
+        self._indice_tab_prediccion_detalle = self.tabs.count()
+        self._vista_prediccion_detalle = VistaPrediccion(embebido=True)
+        self.tabs.addTab(self._vista_prediccion_detalle, "📈  Predicción de demanda (detalle)")
+        # Se exponen también los controles internos de esa pestaña
+        # embebida, para que el tutorial pueda resaltarlos igual que a
+        # cualquier otro control propio de esta vista.
+        self.tutorial_targets["combo_producto_prediccion"] = self._vista_prediccion_detalle._combo_producto
+        self.tutorial_targets["btn_predecir_prediccion"] = self._vista_prediccion_detalle._btn_predecir
+
+    def mostrar_tab_prediccion_detalle(self):
+        """API pública: usada por los enlaces "🧠 Demanda prevista" de
+        Ventas/Producción para abrir directamente la pestaña de
+        predicción de demanda detallada, en vez de solo entrar al
+        módulo y dejar al usuario buscando la pestaña correcta."""
+        self.tabs.setCurrentIndex(self._indice_tab_prediccion_detalle)
 
     # ══════════════════════════════════════════════════════════
     #  TAB 1 — REPOSICIÓN INTELIGENTE
@@ -121,6 +153,7 @@ class VistaCentroInteligencia(QWidget):
         self.btn_calcular_reposicion = QPushButton("🔄  Calcular recomendaciones")
         self.btn_calcular_reposicion.clicked.connect(self._calcular_reposicion)
         fila_ctrl.addWidget(self.btn_calcular_reposicion)
+        self.tutorial_targets["btn_calcular_reposicion"] = self.btn_calcular_reposicion
         fila_ctrl.addStretch()
         v.addLayout(fila_ctrl)
 
@@ -132,6 +165,7 @@ class VistaCentroInteligencia(QWidget):
         )
         self.tabla_reposicion.cellClicked.connect(self._al_seleccionar_recomendacion)
         v.addWidget(self.tabla_reposicion, stretch=1)
+        self.tutorial_targets["tabla_reposicion"] = self.tabla_reposicion
 
         self.lbl_motivo = QLabel("Selecciona un insumo de la tabla para ver el detalle del cálculo.")
         self.lbl_motivo.setWordWrap(True)
@@ -145,20 +179,31 @@ class VistaCentroInteligencia(QWidget):
         self.btn_generar_compra.clicked.connect(self._generar_orden_compra)
         self.btn_generar_compra.setEnabled(False)
         fila_accion.addWidget(self.btn_generar_compra)
+        self.tutorial_targets["btn_generar_compra"] = self.btn_generar_compra
         v.addLayout(fila_accion)
 
         return tab
 
     def _calcular_reposicion(self):
         horizonte = self.combo_horizonte_reposicion.currentData()
-        try:
-            recomendaciones = ejecutar_con_carga(
-                self, lambda: motor_reposicion.calcular_recomendaciones(horizonte_dias=horizonte),
-                mensaje="🧠  Calculando reposición inteligente...",
-                submensaje="Analizando stock, demanda esperada y consumo histórico...",
-            )
-        except Exception as e:
-            self._msg.mostrar(f"No se pudo calcular la reposición: {e}", tipo="error")
+        # ejecutar_en_hilo (y no ejecutar_con_carga): el cálculo de
+        # reposición recorre todo el catálogo de insumos con consumo
+        # histórico y tardaba unos segundos con datos reales — antes
+        # eso significaba una ventana congelada; ahora corre en un hilo
+        # aparte y la interfaz sigue respondiendo mientras se anima el
+        # overlay de carga.
+        self.btn_calcular_reposicion.setEnabled(False)
+        ejecutar_en_hilo(
+            self, lambda: motor_reposicion.calcular_recomendaciones(horizonte_dias=horizonte),
+            al_terminar=self._al_terminar_reposicion,
+            mensaje="🧠  Calculando reposición inteligente...",
+            submensaje="Analizando stock, demanda esperada y consumo histórico...",
+        )
+
+    def _al_terminar_reposicion(self, recomendaciones, error):
+        self.btn_calcular_reposicion.setEnabled(True)
+        if error is not None:
+            self._msg.mostrar(f"No se pudo calcular la reposición: {error}", tipo="error")
             return
 
         self._recomendaciones_actuales = recomendaciones
@@ -238,6 +283,7 @@ class VistaCentroInteligencia(QWidget):
             self.combo_receta_merma.addItem(f"{r['nombre']}", r)
         col_r.addWidget(self.combo_receta_merma)
         fila1.addLayout(col_r, stretch=2)
+        self.tutorial_targets["combo_receta_merma"] = self.combo_receta_merma
 
         col_c = QVBoxLayout()
         col_c.addWidget(QLabel("Cantidad planeada"))
@@ -255,12 +301,14 @@ class VistaCentroInteligencia(QWidget):
         self.btn_estimar_merma = QPushButton("🔍  Estimar merma esperada")
         self.btn_estimar_merma.clicked.connect(self._estimar_merma)
         fila_botones_merma.addWidget(self.btn_estimar_merma)
+        self.tutorial_targets["btn_estimar_merma"] = self.btn_estimar_merma
 
         if puede(sesion_actual.rol, "centro_inteligencia", "entrenar"):
             self.btn_entrenar_merma = QPushButton("🧠  Entrenar / actualizar modelo de merma")
             poner_clase(self.btn_entrenar_merma, "secundario")
             self.btn_entrenar_merma.clicked.connect(self._entrenar_modelo_merma)
             fila_botones_merma.addWidget(self.btn_entrenar_merma)
+            self.tutorial_targets["btn_entrenar_merma"] = self.btn_entrenar_merma
 
         fila_botones_merma.addStretch()
         sl.addLayout(fila_botones_merma)
@@ -306,14 +354,18 @@ class VistaCentroInteligencia(QWidget):
 
     def _entrenar_modelo_merma(self):
         from app.ia.merma_training import entrenar as entrenar_merma
-        try:
-            resultado = ejecutar_con_carga(
-                self, entrenar_merma,
-                mensaje="🧠  Entrenando modelo de merma...",
-                submensaje="Procesando el historial de órdenes de producción completadas...",
-            )
-        except Exception as e:
-            self._msg.mostrar(f"No se pudo entrenar el modelo de merma: {e}", tipo="error")
+        self.btn_entrenar_merma.setEnabled(False)
+        ejecutar_en_hilo(
+            self, entrenar_merma,
+            al_terminar=self._al_terminar_entrenamiento_merma,
+            mensaje="🧠  Entrenando modelo de merma...",
+            submensaje="Procesando el historial de órdenes de producción completadas...",
+        )
+
+    def _al_terminar_entrenamiento_merma(self, resultado, error):
+        self.btn_entrenar_merma.setEnabled(True)
+        if error is not None:
+            self._msg.mostrar(f"No se pudo entrenar el modelo de merma: {error}", tipo="error")
             return
 
         if resultado.get("exito"):
@@ -382,12 +434,13 @@ class VistaCentroInteligencia(QWidget):
         self.btn_actualizar_demanda = QPushButton("🔄  Actualizar resumen")
         self.btn_actualizar_demanda.clicked.connect(self._actualizar_resumen_demanda)
         fila_ctrl.addWidget(self.btn_actualizar_demanda)
+        self.tutorial_targets["btn_actualizar_demanda"] = self.btn_actualizar_demanda
         fila_ctrl.addStretch()
         v.addLayout(fila_ctrl)
 
         nota = QLabel(
-            "Para el detalle diario y el gráfico de cada producto, usa el módulo "
-            "'Predicción Demanda' del menú lateral."
+            "Para el detalle diario y el gráfico de cada producto, usa la pestaña "
+            "'Predicción de demanda (detalle)' de aquí mismo."
         )
         nota.setStyleSheet(f"color: {COLOR_TEXTO_SECUNDARIO};")
         nota.setFont(fuente(8, cursiva=True))
@@ -399,6 +452,7 @@ class VistaCentroInteligencia(QWidget):
             anchos={"Producto": 220, "Demanda prevista": 130, "Promedio diario": 120, "Riesgo de quiebre": 130},
         )
         v.addWidget(self.tabla_demanda, stretch=1)
+        self.tutorial_targets["tabla_demanda"] = self.tabla_demanda
 
         return tab
 
@@ -426,11 +480,20 @@ class VistaCentroInteligencia(QWidget):
                 tags.append("advertencia" if not pred.get("usando_ml") else "normal")
             return filas, tags, n_pronosticados
 
-        filas, tags, n_pronosticados = ejecutar_con_carga(
+        self.btn_actualizar_demanda.setEnabled(False)
+        ejecutar_en_hilo(
             self, _calcular,
+            al_terminar=self._al_terminar_resumen_demanda,
             mensaje="🧠  Analizando demanda...",
             submensaje="Procesando información histórica de ventas por producto...",
         )
+
+    def _al_terminar_resumen_demanda(self, resultado, error):
+        self.btn_actualizar_demanda.setEnabled(True)
+        if error is not None:
+            self._msg.mostrar(f"No se pudo analizar la demanda: {error}", tipo="error")
+            return
+        filas, tags, n_pronosticados = resultado
 
         self.tabla_demanda.cargar_filas(filas, tags_por_fila=tags)
         self.kpi_productos_pronosticados.actualizar(str(n_pronosticados))

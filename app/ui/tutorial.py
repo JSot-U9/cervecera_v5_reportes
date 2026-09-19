@@ -195,11 +195,6 @@ def iniciar_tutorial_modulo(ventana_principal, clave: str, reiniciar: bool = Fal
     return controlador
 
 
-def iniciar_practica_compras(ventana_principal, on_terminar=None):
-    from app.ui.tutorial_practice import PracticaCompras
-    return PracticaCompras(ventana_principal, on_terminar=on_terminar).iniciar()
-
-
 # ══════════════════════════════════════════════════════════════════
 #  CENTRO DE AYUDA
 # ══════════════════════════════════════════════════════════════════
@@ -272,9 +267,6 @@ class CentroAyuda(QDialog):
             estado = estado_tutorial(usuario_id, clave) if usuario_id is not None else "no_iniciado"
             self._fila_tutorial(clave, icono, titulo, descripcion, estado)
 
-        if "compras" in disponibles:
-            self._fila_practica()
-
         self._cuerpo_layout.addStretch()
 
     def _fila_tutorial(self, clave, icono, titulo, descripcion, estado):
@@ -318,36 +310,12 @@ class CentroAyuda(QDialog):
 
         self._cuerpo_layout.addWidget(fila)
 
-    def _fila_practica(self):
-        fila = QFrame()
-        fila.setStyleSheet(
-            f"QFrame {{ background-color: {COLOR_TARJETA}; border: 1px solid {COLOR_PRIMARIO}; "
-            f"border-radius: 6px; }}")
-        fl = QVBoxLayout(fila)
-        fl.setContentsMargins(14, 10, 14, 10)
-        lbl = QLabel("🧑‍🏫  Practicar: Compras")
-        lbl.setFont(fuente(11, negrita=True))
-        fl.addWidget(lbl)
-        lbl2 = QLabel("Registra una compra de prueba de verdad, con ayuda del sistema en cada paso.")
-        lbl2.setStyleSheet(f"color: {COLOR_TEXTO_SECUNDARIO};")
-        lbl2.setFont(fuente(9))
-        lbl2.setWordWrap(True)
-        fl.addWidget(lbl2)
-        btn = QPushButton("Empezar práctica")
-        btn.clicked.connect(self._iniciar_practica)
-        fl.addWidget(btn, alignment=Qt.AlignLeft)
-        self._cuerpo_layout.addWidget(fila)
-
     def _iniciar(self, clave, reiniciar):
         self.accept()
         if clave == "general":
             iniciar_tutorial_general(self.ventana_principal, reiniciar=reiniciar)
         else:
             iniciar_tutorial_modulo(self.ventana_principal, clave, reiniciar=reiniciar)
-
-    def _iniciar_practica(self):
-        self.accept()
-        iniciar_practica_compras(self.ventana_principal)
 
     def keyPressEvent(self, evento):
         if evento.key() == Qt.Key_Escape:

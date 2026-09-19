@@ -130,7 +130,6 @@ app/
     tutorial.py               → sistema de tutorial interactivo
     tutorial_data.py          → datos y textos del tutorial
     tutorial_overlay.py       → overlay transparente para el tutorial
-    tutorial_practice.py      → actividades prácticas del tutorial
     login.py                  → pantalla de ingreso de sesión
     dialogo_creditos.py       → diálogo de créditos y autoría
     dialogo_reporte.py        → diálogo de configuración de reportes

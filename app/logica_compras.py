@@ -13,7 +13,7 @@ falla a la mitad, no se guarda nada (evitamos que quede una compra
 """
 
 from app.basedatos import nueva_sesion
-from app.modelos import OrdenCompra, DetalleCompra, Proveedor
+from app.modelos import OrdenCompra, DetalleCompra, Proveedor, Producto, LoteInventario
 from app.logica_inventario import crear_lote
 
 
@@ -83,6 +83,63 @@ def listar_proveedores_activos(db=None):
         return db.query(Proveedor).filter_by(activo=True).all()
     with nueva_sesion() as db:
         return db.query(Proveedor).filter_by(activo=True).all()
+
+
+def productos_ofrecidos_por_proveedor(db, proveedor_id: int):
+    """Qué insumos ha vendido realmente este proveedor, según el
+    historial de compras.
+
+    Antes el formulario de "Nueva orden de compra" ofrecía el catálogo
+    COMPLETO de insumos sin importar qué proveedor estuviera
+    seleccionado, como si cualquier proveedor pudiera vender cualquier
+    cosa. Esto se resuelve con los datos que el sistema YA tiene: cada
+    compra registrada indica qué le compró la cervecería a qué
+    proveedor, así que ese historial es la fuente de verdad de lo que
+    cada proveedor realmente ofrece.
+
+    Devuelve (productos, es_catalogo_real):
+      - es_catalogo_real=True  → son los productos que este proveedor
+        ha vendido antes.
+      - es_catalogo_real=False → el proveedor no tiene compras
+        registradas todavía (por ejemplo, recién se dio de alta), así
+        que se muestra el catálogo completo de insumos como respaldo,
+        dejando claro en la interfaz que es una lista sin confirmar.
+    """
+    productos = (
+        db.query(Producto)
+        .join(DetalleCompra, DetalleCompra.producto_id == Producto.id)
+        .join(OrdenCompra, OrdenCompra.id == DetalleCompra.orden_id)
+        .filter(OrdenCompra.proveedor_id == proveedor_id, Producto.activo.is_(True))
+        .distinct()
+        .order_by(Producto.nombre)
+        .all()
+    )
+    if productos:
+        return productos, True
+
+    todos = db.query(Producto).filter_by(tipo="Insumo", activo=True).order_by(Producto.nombre).all()
+    return todos, False
+
+
+def ultimos_precios_por_proveedor(db, proveedor_id: int) -> dict:
+    """Último precio pagado A ESTE proveedor por cada producto.
+
+    Antes el precio se autocompletaba con el último lote comprado de
+    ese producto sin importar a quién — es decir, el precio de un
+    proveedor "contaminaba" el formulario de otro. Ahora el precio
+    sugerido es siempre el que ESE proveedor cobró la última vez.
+    """
+    lotes = (
+        db.query(LoteInventario)
+        .filter(LoteInventario.proveedor_id == proveedor_id)
+        .order_by(LoteInventario.id.desc())
+        .all()
+    )
+    precios = {}
+    for lote in lotes:
+        if lote.producto_id not in precios and lote.costo_unitario:
+            precios[lote.producto_id] = lote.costo_unitario
+    return precios
 
 
 def crear_proveedor(razon_social: str, ruc: str = "", contacto: str = "",

@@ -317,6 +317,15 @@ class VentanaCerrarOrden(QDialog):
         self.setWindowTitle("Cerrar orden de producción")
         self.orden_id = orden_id
         self.al_guardar = al_guardar
+        # Se necesita la cantidad planeada para poder sugerir la merma
+        # automáticamente (ver _al_cambiar_cantidad_real más abajo).
+        with nueva_sesion() as db:
+            orden = db.get(OrdenProduccion, orden_id)
+            self.cantidad_planeada = orden.cantidad_planeada if orden else None
+        # True en cuanto el usuario escribe algo él mismo en el campo de
+        # merma: a partir de ahí se respeta lo que puso y se deja de
+        # sobrescribirlo automáticamente.
+        self._merma_editada_manualmente = False
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -338,6 +347,15 @@ class VentanaCerrarOrden(QDialog):
         lbl_info.setStyleSheet(f"color: {COLOR_TEXTO_SECUNDARIO};")
         lbl_info.setFont(fuente(9))
         cuerpo.addWidget(lbl_info)
+
+        if self.cantidad_planeada:
+            lbl_planeada = QLabel(
+                f"Cantidad planeada: {self.cantidad_planeada:.1f}. La merma se sugiere "
+                f"automáticamente como (planeada − real) — puedes corregirla si lo necesitas.")
+            lbl_planeada.setStyleSheet(f"color: {COLOR_TEXTO_SECUNDARIO};")
+            lbl_planeada.setFont(fuente(8, cursiva=True))
+            lbl_planeada.setWordWrap(True)
+            cuerpo.addWidget(lbl_planeada)
         cuerpo.addSpacing(8)
 
         sec_prod = SeccionFormulario("Producción real")
@@ -352,6 +370,7 @@ class VentanaCerrarOrden(QDialog):
         c1.addWidget(lbl_c1)
         self.entrada_cantidad_real = QLineEdit()
         self.entrada_cantidad_real.setFixedWidth(120)
+        self.entrada_cantidad_real.textEdited.connect(self._al_cambiar_cantidad_real)
         c1.addWidget(self.entrada_cantidad_real)
         f1.addLayout(c1)
 
@@ -360,6 +379,11 @@ class VentanaCerrarOrden(QDialog):
         c2.addWidget(lbl_c2)
         self.entrada_merma = QLineEdit("0")
         self.entrada_merma.setFixedWidth(120)
+        # textEdited (a diferencia de textChanged) solo se dispara
+        # cuando el USUARIO teclea, no cuando el código llama a
+        # setText(...) para autocompletar — así se puede distinguir
+        # "el sistema sugirió esto" de "el usuario lo corrigió a mano".
+        self.entrada_merma.textEdited.connect(self._marcar_merma_editada)
         c2.addWidget(self.entrada_merma)
         f1.addLayout(c2)
         f1.addStretch()
@@ -412,6 +436,21 @@ class VentanaCerrarOrden(QDialog):
         cuerpo.addLayout(fila_btn)
 
         centrar_ventana(self, 500, 560)
+
+    def _marcar_merma_editada(self, _texto: str):
+        self._merma_editada_manualmente = True
+
+    def _al_cambiar_cantidad_real(self, texto: str):
+        if self._merma_editada_manualmente or not self.cantidad_planeada:
+            return
+        try:
+            cantidad_real = float(texto)
+        except ValueError:
+            return
+        merma_sugerida = max(0.0, self.cantidad_planeada - cantidad_real)
+        # setText no dispara textEdited, así que esto no se confunde
+        # con una edición manual del usuario.
+        self.entrada_merma.setText(f"{merma_sugerida:.2f}")
 
     def _guardar(self):
         try:

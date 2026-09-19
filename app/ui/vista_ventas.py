@@ -31,7 +31,7 @@ class VistaVentas(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
         layout.addWidget(EncabezadoModulo(
-            "Ventas", "Registro de órdenes de venta · El inventario se descuenta automáticamente (FIFO)",
+            "Realizar ventas", "Registro de órdenes de venta · El inventario se descuenta automáticamente (FIFO)",
             icono="💰",
         ))
 
@@ -57,7 +57,7 @@ class VistaVentas(QWidget):
                 "＋  Nueva venta", self._abrir_nueva_venta)
         self.tutorial_targets["btn_reporte"] = barra.agregar_boton(
             "📊  Reporte", self._abrir_dialogo_reporte, estilo="accionSecundaria")
-        if "prediccion" in modulos_visibles(sesion_actual.rol):
+        if "centro_inteligencia" in modulos_visibles(sesion_actual.rol):
             barra.agregar_boton(
                 "🧠  Demanda prevista", lambda: self._ir_a_prediccion(),
                 estilo="accionSecundaria")
@@ -92,10 +92,16 @@ class VistaVentas(QWidget):
 
     def _ir_a_prediccion(self):
         """Enlace de integración IA (sección 28): demanda prevista de
-        cada producto, calculada en el módulo de Predicción."""
+        cada producto. Antes navegaba al módulo "prediccion" (ya
+        eliminado del sidebar, sección G del reporte de bugs); ahora
+        entra a Centro de Inteligencia y abre directamente la pestaña
+        de predicción de demanda detallada."""
         ventana = self.window()
         if hasattr(ventana, "navegar"):
-            ventana.navegar("prediccion")
+            ventana.navegar("centro_inteligencia")
+        vista = ventana.obtener_vista("centro_inteligencia") if hasattr(ventana, "obtener_vista") else None
+        if vista is not None and hasattr(vista, "mostrar_tab_prediccion_detalle"):
+            vista.mostrar_tab_prediccion_detalle()
 
     def refrescar(self):
         with nueva_sesion() as db:

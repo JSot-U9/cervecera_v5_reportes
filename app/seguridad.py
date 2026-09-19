@@ -70,12 +70,12 @@ def verificar_contrasena(contrasena_plana: str, hash_guardado: str) -> bool:
 # --------------------------------------------------------------------
 # Qué módulos ve cada rol en el menú lateral.
 MODULOS_POR_ROL = {
-    "ADMIN":      {"dashboard", "compras", "inventario", "produccion", "ventas", "costos", "prediccion", "centro_inteligencia", "admin"},
+    "ADMIN":      {"dashboard", "compras", "inventario", "produccion", "ventas", "costos", "centro_inteligencia", "admin"},
     "COMPRAS":    {"dashboard", "compras", "centro_inteligencia"},
     "INVENTARIO": {"dashboard", "inventario"},
-    "PRODUCCION": {"dashboard", "produccion", "inventario", "prediccion", "centro_inteligencia"},
-    "VENTAS":     {"dashboard", "ventas", "prediccion"},
-    "COSTOS":     {"dashboard", "costos", "prediccion"},
+    "PRODUCCION": {"dashboard", "produccion", "inventario", "centro_inteligencia"},
+    "VENTAS":     {"dashboard", "ventas", "centro_inteligencia"},
+    "COSTOS":     {"dashboard", "costos", "centro_inteligencia"},
 }
 
 # Qué acciones puede hacer cada rol dentro de cada módulo.
@@ -102,19 +102,19 @@ ACCIONES_POR_ROL = {
         "ADMIN":  {"ver"},
         "COSTOS": {"ver"},
     },
-    "prediccion": {
-        "ADMIN":      {"ver", "predecir", "entrenar"},
-        "VENTAS":     {"ver", "predecir"},
-        "PRODUCCION": {"ver", "predecir"},
-        "COSTOS":     {"ver", "predecir"},
-    },
     "admin": {
         "ADMIN": {"ver", "crear", "desactivar"},
     },
+    # "prediccion" ya no es un módulo aparte del menú lateral (sección G
+    # del reporte de bugs): la Predicción de Demanda ahora vive como una
+    # pestaña más dentro de Centro de Inteligencia. Los roles que antes
+    # tenían acceso a "prediccion" (VENTAS, COSTOS) ahora lo tienen aquí.
     "centro_inteligencia": {
         "ADMIN":      {"ver", "predecir", "entrenar", "generar_compra"},
         "COMPRAS":    {"ver", "predecir", "generar_compra"},
         "PRODUCCION": {"ver", "predecir"},
+        "VENTAS":     {"ver", "predecir"},
+        "COSTOS":     {"ver", "predecir"},
     },
 }
 

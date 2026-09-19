@@ -26,7 +26,7 @@ class VistaCostos(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
         layout.addWidget(EncabezadoModulo(
-            "Costos", "Análisis de costos reales y márgenes de ganancia por lote de producción cerrado",
+            "Reportes de ventas", "Análisis de costos reales y márgenes de ganancia por lote de producción cerrado",
             icono="📊",
         ))
 

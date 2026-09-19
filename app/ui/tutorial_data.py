@@ -112,12 +112,13 @@ def marcar_tutorial_general_visto(usuario_id: int):
 
 _ICONOS_MODULO = {
     "dashboard": "🏠", "compras": "🛒", "inventario": "📦",
-    "produccion": "🍺", "ventas": "💰", "costos": "📊", "admin": "⚙️",
+    "produccion": "🍺", "ventas": "💰", "costos": "📊",
+    "centro_inteligencia": "🧠", "admin": "⚙️",
 }
 _NOMBRES_MODULO = {
     "dashboard": "Inicio", "compras": "Compras", "inventario": "Inventario",
-    "produccion": "Producción", "ventas": "Ventas", "costos": "Costos",
-    "admin": "Administración",
+    "produccion": "Producción", "ventas": "Realizar ventas", "costos": "Reportes de ventas",
+    "centro_inteligencia": "Centro de Inteligencia", "admin": "Administración",
 }
 _DESCRIPCIONES_MODULO = {
     "dashboard": "Aquí ves de un vistazo los indicadores clave del negocio: "
@@ -133,6 +134,9 @@ _DESCRIPCIONES_MODULO = {
               "descuenta automáticamente siguiendo el orden FIFO.",
     "costos": "Analiza el costo real y el margen de ganancia de cada lote "
               "de producción ya cerrado.",
+    "centro_inteligencia": "Reúne las recomendaciones de IA del sistema: qué "
+                            "reponer, cuánta merma esperar y cuánta demanda "
+                            "prevista tiene cada producto.",
     "admin": "Configura los datos de la empresa y administra usuarios del "
              "sistema.",
 }
@@ -140,7 +144,8 @@ _DESCRIPCIONES_MODULO = {
 
 def construir_tutorial_general(nombre_empresa: str, rol: str) -> Tutorial:
     modulos_rol = modulos_visibles(rol)
-    orden = ["dashboard", "compras", "inventario", "produccion", "ventas", "costos", "admin"]
+    orden = ["dashboard", "compras", "inventario", "produccion", "ventas", "costos",
+             "centro_inteligencia", "admin"]
 
     pasos = [
         PasoTutorial(
@@ -372,7 +377,7 @@ def _tutorial_ventas() -> Tutorial:
             target=_t("btn_reporte"),
         ),
     ]
-    return Tutorial("ventas", "Ventas", "💰", "Aprende a registrar ventas", pasos)
+    return Tutorial("ventas", "Realizar ventas", "💰", "Aprende a registrar ventas", pasos)
 
 
 def _tutorial_costos() -> Tutorial:
@@ -402,7 +407,7 @@ def _tutorial_costos() -> Tutorial:
             target=_t("btn_reporte"),
         ),
     ]
-    return Tutorial("costos", "Costos", "📊", "Aprende a consultar costos", pasos)
+    return Tutorial("costos", "Reportes de ventas", "📊", "Aprende a consultar costos", pasos)
 
 
 def _tutorial_reportes() -> Tutorial:
@@ -440,16 +445,105 @@ def _tutorial_reportes() -> Tutorial:
                      pasos, requiere_modulo="compras")
 
 
+def _tutorial_centro_inteligencia() -> Tutorial:
+    pasos = [
+        PasoTutorial(
+            modulo="centro_inteligencia", icono="🧠", titulo="Centro de Inteligencia",
+            texto="Aquí se concentran los tres resultados de IA del sistema: qué "
+                  "insumos conviene reponer, cuánta merma se espera en una "
+                  "producción y cuánta demanda se prevé por producto. Tú siempre "
+                  "decides la acción — el sistema solo recomienda.",
+            target=lambda ctx: None,
+        ),
+        PasoTutorial(
+            modulo="centro_inteligencia", icono="📊", titulo="Indicadores generales",
+            texto="Resumen rápido: cuántos insumos están en riesgo de quiebre, "
+                  "cuántos tienen reposición sugerida y la merma histórica "
+                  "promedio, calculados con datos reales del sistema.",
+            target=_t("kpi_riesgo"),
+        ),
+        PasoTutorial(
+            modulo="centro_inteligencia", tab="Reposición inteligente",
+            icono="📦", titulo="Reposición inteligente",
+            texto="Calcula, por horizonte de días, cuánto conviene comprar de "
+                  "cada insumo según el stock disponible y la demanda esperada.",
+            target=_t("btn_calcular_reposicion"),
+        ),
+        PasoTutorial(
+            modulo="centro_inteligencia", tab="Reposición inteligente",
+            icono="🛒", titulo="Generar la compra",
+            texto="Selecciona un insumo de la tabla y, si tiene reposición "
+                  "sugerida, este botón abre una orden de compra en el módulo "
+                  "de Compras ya prellenada con el producto y la cantidad.",
+            target=_t("btn_generar_compra"),
+        ),
+        PasoTutorial(
+            modulo="centro_inteligencia", tab="Predicción de merma",
+            icono="🍺", titulo="Predicción de merma",
+            texto="Antes de planear o cerrar una producción, estima qué "
+                  "porcentaje de merma es esperable para esa receta y esa "
+                  "cantidad, comparado con el historial de esa misma receta.",
+            target=_t("combo_receta_merma"),
+        ),
+        PasoTutorial(
+            modulo="centro_inteligencia", tab="Predicción de merma",
+            icono="🔍", titulo="Estimar merma esperada",
+            texto="Con la receta y la cantidad planeada elegidas, este botón "
+                  "calcula el rendimiento y la merma esperados.",
+            target=_t("btn_estimar_merma"),
+        ),
+        PasoTutorial(
+            modulo="centro_inteligencia", tab="Demanda prevista (resumen)",
+            icono="🔮", titulo="Demanda prevista — resumen",
+            texto="Vista rápida de la demanda estimada de TODOS los productos a "
+                  "la vez, para un mismo horizonte de días — útil para detectar "
+                  "de un vistazo qué productos tienen riesgo de quiebre.",
+            target=_t("btn_actualizar_demanda"),
+        ),
+        PasoTutorial(
+            modulo="centro_inteligencia", tab="Demanda prevista (resumen)",
+            icono="📋", titulo="Tabla de demanda",
+            texto="Cada fila indica la demanda total prevista, el promedio "
+                  "diario y si la estimación usa el modelo de IA entrenado o "
+                  "todavía un cálculo básico (mientras se acumula historial).",
+            target=_t("tabla_demanda"),
+        ),
+        PasoTutorial(
+            modulo="centro_inteligencia", tab="Predicción de demanda (detalle)",
+            icono="📈", titulo="Predicción de demanda — detalle",
+            texto="Aquí puedes elegir UN producto a la vez y ver su gráfico "
+                  "histórico junto con la predicción, con más detalle que el "
+                  "resumen multi-producto de la pestaña anterior.",
+            target=_t("combo_producto_prediccion"),
+        ),
+        PasoTutorial(
+            modulo="centro_inteligencia", tab="Predicción de demanda (detalle)",
+            icono="🔮", titulo="Generar la predicción",
+            texto="Elige el producto y el horizonte, y este botón genera la "
+                  "predicción con el modelo entrenado para ese producto.",
+            target=_t("btn_predecir_prediccion"),
+        ),
+    ]
+    return Tutorial("centro_inteligencia", "Centro de Inteligencia", "🧠",
+                     "Aprende a usar la reposición, la merma y la predicción de demanda", pasos)
+
+
 TUTORIALES_MODULO: dict[str, Callable[[], Tutorial]] = {
     "compras": _tutorial_compras,
     "inventario": _tutorial_inventario,
     "produccion": _tutorial_produccion,
     "ventas": _tutorial_ventas,
     "costos": _tutorial_costos,
+    "centro_inteligencia": _tutorial_centro_inteligencia,
     "reportes": _tutorial_reportes,
 }
 
-ORDEN_CENTRO_AYUDA = ["general", "compras", "inventario", "produccion", "ventas", "costos", "reportes"]
+# Sección I.3 del reporte de bugs: antes no había ningún tutorial que
+# explicara "Centro de Inteligencia" ni "Predicción de demanda" — se
+# agrega aquí, entre Costos y Reportes, siguiendo el mismo orden que
+# tiene el módulo en el menú lateral.
+ORDEN_CENTRO_AYUDA = ["general", "compras", "inventario", "produccion", "ventas", "costos",
+                      "centro_inteligencia", "reportes"]
 
 
 def tutoriales_disponibles_para_rol(rol: str) -> list[str]:
