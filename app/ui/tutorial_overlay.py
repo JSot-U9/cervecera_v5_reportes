@@ -66,6 +66,11 @@ class _Velo(QWidget):
         self._hueco = None
 
     def set_hueco(self, rect: QRect | None):
+        # Early-exit: si el hueco no cambió no hace falta recalcular la
+        # máscara ni forzar un repaint — ahorra un QPainter pass completo
+        # por cada evento de geometría redundante que llega en ráfaga.
+        if rect == self._hueco:
+            return
         self._hueco = rect
         if rect is not None and not rect.isEmpty():
             region = QRegion(self.rect()).subtracted(QRegion(rect))
@@ -354,7 +359,17 @@ class OverlayTutorial(QObject):
 
     def eventFilter(self, obj, evento):
         if obj is self._host and evento.type() in (QEvent.Resize, QEvent.Move):
-            QTimer.singleShot(0, self._reposicionar_todo)
+            # Debounce: en el tutorial, navegar a un módulo dispara
+            # decenas de eventos Resize/Move seguidos (stack cambia,
+            # layouts se ajustan, pestaña se selecciona…). Sin este
+            # guard se llama _reposicionar_todo una vez por cada uno,
+            # recalculando geometrías y redibujando el velo en cada
+            # frame aunque el resultado final sea idéntico. Con el timer
+            # pendiente se colapsa toda esa ráfaga en un único repaint
+            # al final del ciclo.
+            if not getattr(self, "_reposicion_pendiente", False):
+                self._reposicion_pendiente = True
+                QTimer.singleShot(0, self._reposicionar_todo)
         elif obj is self._host and evento.type() == QEvent.KeyPress:
             if evento.key() == Qt.Key_Escape and self._on_saltar_actual and not self._cerrado:
                 self._on_saltar_actual()
@@ -362,6 +377,7 @@ class OverlayTutorial(QObject):
         return False
 
     def _reposicionar_todo(self):
+        self._reposicion_pendiente = False
         if self._cerrado or self._velo is None or not self._velo.isVisible():
             return
         self._velo.setGeometry(0, 0, self._host.width(), self._host.height())

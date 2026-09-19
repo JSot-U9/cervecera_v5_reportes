@@ -19,6 +19,7 @@ from app.logica_compras import (
     registrar_compra, listar_ordenes_compra, listar_proveedores_activos,
     crear_proveedor, actualizar_proveedor,
     productos_ofrecidos_por_proveedor, ultimos_precios_por_proveedor,
+    proveedores_probables_para_producto,
 )
 from app.ui.widgets import (
     EncabezadoModulo, BarraBusqueda, TablaDatos, SeccionFormulario, MensajeEstado,
@@ -306,7 +307,23 @@ class VentanaNuevaOrden(QDialog):
         self._cantidad_sugerida = cantidad_sugerida
 
         with nueva_sesion() as db:
-            self.proveedores = listar_proveedores_activos(db)
+            # Cuando la orden viene prellenada desde una recomendación
+            # del Centro de Inteligencia (Reposición inteligente), ya
+            # se conoce el producto ANTES que el proveedor. Antes, en
+            # ese caso, el selector de proveedor mostraba TODA la lista
+            # de proveedores activos sin filtrar — una tienda de
+            # envases o etiquetas aparecía igual que una de levadura
+            # como opción para reponer un insumo que nunca le compró.
+            # Ahora se prioriza a los proveedores que de verdad han
+            # vendido ese insumo antes (mismo criterio que ya se usa al
+            # revés en productos_ofrecidos_por_proveedor).
+            self._proveedores_es_catalogo_real = True
+            if self._producto_preseleccionado is not None:
+                self.proveedores, self._proveedores_es_catalogo_real = (
+                    proveedores_probables_para_producto(db, self._producto_preseleccionado)
+                )
+            else:
+                self.proveedores = listar_proveedores_activos(db)
             # El catálogo de productos y los precios YA NO son fijos ni
             # globales: dependen del proveedor elegido (ver
             # _al_cambiar_proveedor). Se dejan vacíos aquí; se llenan en
@@ -367,6 +384,25 @@ class VentanaNuevaOrden(QDialog):
         lbl_nota_proveedor.setFont(fuente(8, cursiva=True))
         lbl_nota_proveedor.setWordWrap(True)
         spl.addWidget(lbl_nota_proveedor)
+
+        # Aviso de que la lista de proveedores fue filtrada a los que
+        # probablemente venden el insumo recomendado (o que no se pudo
+        # filtrar y se muestra el respaldo completo). Solo aplica
+        # cuando la orden viene prellenada desde una recomendación.
+        self.lbl_proveedor_hint = QLabel("")
+        self.lbl_proveedor_hint.setStyleSheet(f"color: {COLOR_TEXTO_SECUNDARIO};")
+        self.lbl_proveedor_hint.setFont(fuente(8, cursiva=True))
+        self.lbl_proveedor_hint.setWordWrap(True)
+        if self._producto_preseleccionado is not None:
+            if self.proveedores and self._proveedores_es_catalogo_real:
+                self.lbl_proveedor_hint.setText(
+                    f"✓ Mostrando {len(self.proveedores)} proveedor(es) que ya "
+                    "vendieron este insumo antes.")
+            else:
+                self.lbl_proveedor_hint.setText(
+                    "ℹ Nadie le ha vendido este insumo antes a la cervecería — se "
+                    "muestra la lista completa de proveedores como referencia.")
+        spl.addWidget(self.lbl_proveedor_hint)
 
         # ── Agregar producto ────────────────────────────────────
         sec_prod = SeccionFormulario("Agregar producto a la orden")

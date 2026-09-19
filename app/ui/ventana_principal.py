@@ -299,26 +299,52 @@ class VentanaPrincipal(QMainWindow):
 
     # ── Vistas ────────────────────────────────────────────────────
     def _crear_vistas(self):
+        # Lazy: se guarda solo la fábrica; cada vista se instancia la
+        # primera vez que se navega a ella, no todas al arrancar.
+        # Esto elimina el coste de construir (y ejecutar refrescar() en)
+        # módulos que el usuario puede que nunca abra en esa sesión.
+        self._fabricas: dict = {}
         for clave, _icono, _texto, fabrica, _seccion in DEFINICION_MODULOS:
             if clave not in self._modulos_permitidos:
                 continue
+            self._fabricas[clave] = fabrica
+
+    def _obtener_o_crear_vista(self, clave: str):
+        """Devuelve la vista ya construida, o la construye ahora si es la
+        primera vez que se navega a ese módulo."""
+        if clave not in self._vistas:
+            fabrica = self._fabricas.get(clave)
+            if fabrica is None:
+                return None
             vista = fabrica()
             self._stack.addWidget(vista)
             self._vistas[clave] = vista
+        return self._vistas[clave]
 
     def _navegar(self, clave: str):
-        if clave not in self._vistas:
+        if clave not in self._fabricas:
             return
         if self._clave_activa and self._clave_activa in self._botones_menu:
             poner_clase(self._botones_menu[self._clave_activa], "sidebar")
         if clave in self._botones_menu:
             poner_clase(self._botones_menu[clave], "sidebarActivo")
+
+        ya_activa = (clave == self._clave_activa)
         self._clave_activa = clave
-        self._stack.setCurrentWidget(self._vistas[clave])
+
+        vista = self._obtener_o_crear_vista(clave)
+        if vista is None:
+            return
+
+        self._stack.setCurrentWidget(vista)
         titulo, migas = _TITULOS_MODULO.get(clave, (clave.title(), [clave.title()]))
         self._header.establecer_titulo(titulo, migas)
-        vista = self._vistas[clave]
-        if hasattr(vista, "refrescar"):
+
+        # No re-ejecutar refrescar() si el usuario ya estaba aquí: evita
+        # disparar consultas a BD y reconstruir tablas sin motivo cada vez
+        # que el tutorial navega al módulo activo (el caso más común de
+        # "miles de iteraciones" que mencionaste).
+        if not ya_activa and hasattr(vista, "refrescar"):
             ejecutar_con_carga(self._stack, vista.refrescar, mensaje=f"Cargando {titulo}...")
         self._actualizar_notificaciones()
 

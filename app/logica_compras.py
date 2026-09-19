@@ -121,6 +121,47 @@ def productos_ofrecidos_por_proveedor(db, proveedor_id: int):
     return todos, False
 
 
+def proveedores_probables_para_producto(db, producto_id: int):
+    """Proveedores que probablemente venden este producto, según el
+    historial de compras — es la relación inversa de
+    productos_ofrecidos_por_proveedor().
+
+    Se usa cuando ya se conoce el producto ANTES de elegir proveedor
+    (por ejemplo, al generar una orden de compra desde una
+    recomendación del motor de Reposición inteligente): antes, en ese
+    flujo, el selector de proveedor mostraba TODA la lista de
+    proveedores activos sin importar qué vendiera cada uno (una
+    tienda de levadura aparecía igual que una de envases o etiquetas
+    como opción para reponer lúpulo). Ahora se prioriza a quienes de
+    verdad han vendido ese producto antes, usando el mismo historial
+    de OrdenCompra/DetalleCompra que ya es la fuente de verdad en
+    productos_ofrecidos_por_proveedor().
+
+    Devuelve (proveedores, es_catalogo_real):
+      - es_catalogo_real=True  → son proveedores que han vendido este
+        producto antes.
+      - es_catalogo_real=False → nadie le ha vendido este producto
+        todavía a la cervecería (por ejemplo, un insumo nuevo), así
+        que se muestra la lista completa de proveedores activos como
+        respaldo, dejando claro en la interfaz que es una lista sin
+        confirmar.
+    """
+    proveedores = (
+        db.query(Proveedor)
+        .join(OrdenCompra, OrdenCompra.proveedor_id == Proveedor.id)
+        .join(DetalleCompra, DetalleCompra.orden_id == OrdenCompra.id)
+        .filter(DetalleCompra.producto_id == producto_id, Proveedor.activo.is_(True))
+        .distinct()
+        .order_by(Proveedor.razon_social)
+        .all()
+    )
+    if proveedores:
+        return proveedores, True
+
+    todos = db.query(Proveedor).filter_by(activo=True).order_by(Proveedor.razon_social).all()
+    return todos, False
+
+
 def ultimos_precios_por_proveedor(db, proveedor_id: int) -> dict:
     """Último precio pagado A ESTE proveedor por cada producto.
 

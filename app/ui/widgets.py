@@ -882,35 +882,50 @@ class IndicadorCarga(QWidget):
         self.setAttribute(Qt.WA_StyledBackground, True)
         self.setStyleSheet("background-color: rgba(250, 248, 240, 0.94);")
 
+        # Layout externo: solo centra el panel interno verticalmente.
         layout = QVBoxLayout(self)
         layout.setAlignment(Qt.AlignCenter)
-        layout.setSpacing(10)
+        layout.setSpacing(0)
+        layout.setContentsMargins(0, 0, 0, 0)
+
+        # Panel interno de ancho fijo: evita que los QLabel se compriman
+        # a su mínimo sizeHint cuando el overlay hereda un ancho grande
+        # del contenedor padre, lo que hacía que el texto del mensaje
+        # principal apareciera cortado a la mitad de la primera línea.
+        _panel = QWidget(self)
+        _panel.setFixedWidth(340)
+        _panel.setStyleSheet("background: transparent;")
+        panel_layout = QVBoxLayout(_panel)
+        panel_layout.setAlignment(Qt.AlignCenter)
+        panel_layout.setSpacing(10)
+        panel_layout.setContentsMargins(10, 0, 10, 0)
+        layout.addWidget(_panel, alignment=Qt.AlignCenter)
 
         self._lbl_icono = QLabel("⏳")
         self._lbl_icono.setFont(fuente(24))
         self._lbl_icono.setAlignment(Qt.AlignCenter)
         self._lbl_icono.setStyleSheet("background: transparent;")
-        layout.addWidget(self._lbl_icono)
+        panel_layout.addWidget(self._lbl_icono)
 
         self._lbl_mensaje = QLabel("Cargando...")
         self._lbl_mensaje.setFont(fuente(10, negrita=True))
         self._lbl_mensaje.setAlignment(Qt.AlignCenter)
+        self._lbl_mensaje.setWordWrap(True)
         self._lbl_mensaje.setStyleSheet(f"background: transparent; color: {COLOR_TEXTO};")
-        layout.addWidget(self._lbl_mensaje)
+        panel_layout.addWidget(self._lbl_mensaje)
 
         self._lbl_submensaje = QLabel("")
         self._lbl_submensaje.setFont(fuente(9))
         self._lbl_submensaje.setAlignment(Qt.AlignCenter)
         self._lbl_submensaje.setWordWrap(True)
-        self._lbl_submensaje.setMaximumWidth(320)
         self._lbl_submensaje.setStyleSheet(f"background: transparent; color: {COLOR_TEXTO_SECUNDARIO};")
-        layout.addWidget(self._lbl_submensaje, alignment=Qt.AlignCenter)
+        panel_layout.addWidget(self._lbl_submensaje)
 
         self._barra = QProgressBar()
         self._barra.setRange(0, 0)  # indeterminado: no conocemos el avance real
         self._barra.setFixedWidth(220)
         self._barra.setTextVisible(False)
-        layout.addWidget(self._barra, alignment=Qt.AlignCenter)
+        panel_layout.addWidget(self._barra, alignment=Qt.AlignCenter)
 
         self.hide()
 
