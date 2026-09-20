@@ -18,6 +18,7 @@ from app.ui.widgets import (
     EncabezadoModulo, BarraBusqueda, TablaDatos, SeccionFormulario, MensajeEstado,
     centrar_ventana, formatear_estado, tag_para_estado, BotonAyuda,
     EstadoVacio, conectar_pestanas_a_header, texto_pestana_legible,
+    CampoFormulario, conectar_boton_a_validez,
 )
 from app.ui.vista_detalle_producto import VistaDetalleProducto
 from app.ui.estilos import COLOR_TEXTO_SECUNDARIO, COLOR_PRIMARIO, fuente, poner_clase, fondo
@@ -343,18 +344,13 @@ class VentanaAjusteStock(QDialog):
         secl = QVBoxLayout(sec)
         cuerpo.addWidget(sec)
 
-        lbl_cant = QLabel("Nueva cantidad disponible *")
-        lbl_cant.setFont(fuente(9, negrita=True))
-        secl.addWidget(lbl_cant)
-        self.entrada_cantidad = QLineEdit(str(self.cantidad_actual))
-        secl.addWidget(self.entrada_cantidad)
-        secl.addSpacing(6)
-
-        lbl_motivo = QLabel("Motivo del ajuste *")
-        lbl_motivo.setFont(fuente(9, negrita=True))
-        secl.addWidget(lbl_motivo)
-        self.entrada_motivo = QLineEdit()
-        secl.addWidget(self.entrada_motivo)
+        self.campo_cantidad = CampoFormulario(
+            "Nueva cantidad disponible", obligatorio=True, tipo="numero",
+            permitir_negativo=False)
+        self.campo_cantidad.set(str(self.cantidad_actual))
+        self.campo_motivo = CampoFormulario("Motivo del ajuste", obligatorio=True)
+        secl.addWidget(self.campo_cantidad)
+        secl.addWidget(self.campo_motivo)
 
         cuerpo.addStretch()
         fila_btn = QHBoxLayout()
@@ -363,30 +359,25 @@ class VentanaAjusteStock(QDialog):
         poner_clase(btn_cancelar, "secundario")
         btn_cancelar.clicked.connect(self.reject)
         fila_btn.addWidget(btn_cancelar)
-        btn_guardar = QPushButton("💾  Guardar ajuste")
-        btn_guardar.clicked.connect(self._guardar)
-        fila_btn.addWidget(btn_guardar)
+        self.btn_guardar = QPushButton("💾  Guardar ajuste")
+        self.btn_guardar.clicked.connect(self._guardar)
+        fila_btn.addWidget(self.btn_guardar)
         cuerpo.addLayout(fila_btn)
 
+        conectar_boton_a_validez(self.btn_guardar, [self.campo_cantidad, self.campo_motivo])
         centrar_ventana(self, 440, 380)
 
     def _guardar(self):
-        try:
-            nueva_cantidad = float(self.entrada_cantidad.text())
-            if nueva_cantidad < 0:
-                raise ValueError
-        except ValueError:
-            self._msg.mostrar("La cantidad debe ser un número mayor o igual a 0.", "error")
+        campos = (self.campo_cantidad, self.campo_motivo)
+        if not all(c.validar() for c in campos):
             return
-        if not self.entrada_motivo.text().strip():
-            self._msg.mostrar("El motivo del ajuste es obligatorio.", "error")
-            return
+        nueva_cantidad = self.campo_cantidad.valor_numero()
+        motivo = self.campo_motivo.get()
 
         with nueva_sesion() as db:
             try:
                 ajustar_stock(db, self.lote_id, nueva_cantidad,
-                               motivo=self.entrada_motivo.text().strip(),
-                               usuario_id=sesion_actual.usuario_id)
+                               motivo=motivo, usuario_id=sesion_actual.usuario_id)
                 db.commit()
             except Exception as error:
                 self._msg.mostrar(f"No se pudo guardar el ajuste: {error}", "error", 0)
@@ -430,35 +421,28 @@ class VentanaProducto(QDialog):
         cuerpo.addWidget(self._msg)
 
         sec = SeccionFormulario("Información del producto")
-        secl = QGridLayout(sec)
-        secl.setColumnStretch(1, 1)
+        secl = QVBoxLayout(sec)
         cuerpo.addWidget(sec)
 
-        self.entrada_codigo = QLineEdit()
-        self.entrada_codigo.setReadOnly(True)
-        self.entrada_codigo.setStyleSheet(f"color: {COLOR_TEXTO_SECUNDARIO};")
-        self.entrada_nombre = QLineEdit()
-        self.combo_tipo = QComboBox()
-        self.combo_tipo.addItems(["Insumo", "Producto terminado"])
-        self.combo_tipo.currentTextChanged.connect(self._actualizar_codigo_sugerido)
-        self.entrada_unidad = QLineEdit()
-        self.entrada_unidad.setPlaceholderText("kg, L, g, unidad...")
-        self.entrada_precio = QLineEdit("0")
-        self.entrada_stock_minimo = QLineEdit("0")
+        self.campo_codigo = CampoFormulario("Código único", readonly=True)
+        self.campo_nombre = CampoFormulario("Nombre del producto", obligatorio=True)
+        self.campo_tipo = CampoFormulario(
+            "Tipo de producto", tipo="combobox",
+            opciones=["Insumo", "Producto terminado"],
+        )
+        self.campo_tipo.widget.currentTextChanged.connect(self._actualizar_codigo_sugerido)
+        self.campo_unidad = CampoFormulario("Unidad de medida")
+        self.campo_unidad.widget.setPlaceholderText("kg, L, g, unidad...")
+        self.campo_precio = CampoFormulario(
+            "Precio de venta (S/)", tipo="numero", permitir_negativo=False)
+        self.campo_precio.set("0")
+        self.campo_stock_minimo = CampoFormulario(
+            "Stock mínimo", tipo="numero", permitir_negativo=False)
+        self.campo_stock_minimo.set("0")
 
-        filas = [
-            ("Código único", self.entrada_codigo, False),
-            ("Nombre del producto *", self.entrada_nombre, True),
-            ("Tipo de producto", self.combo_tipo, False),
-            ("Unidad de medida", self.entrada_unidad, False),
-            ("Precio de venta (S/)", self.entrada_precio, False),
-            ("Stock mínimo", self.entrada_stock_minimo, False),
-        ]
-        for i, (etiqueta, widget, obligatorio) in enumerate(filas):
-            lbl_campo = QLabel(etiqueta)
-            lbl_campo.setFont(fuente(9, negrita=obligatorio))
-            secl.addWidget(lbl_campo, i, 0)
-            secl.addWidget(widget, i, 1)
+        for campo in (self.campo_codigo, self.campo_nombre, self.campo_tipo,
+                      self.campo_unidad, self.campo_precio, self.campo_stock_minimo):
+            secl.addWidget(campo)
 
         lbl_nota = QLabel("* Campo obligatorio  ·  el código se genera automáticamente según el tipo")
         lbl_nota.setStyleSheet(f"color: {COLOR_TEXTO_SECUNDARIO};")
@@ -472,29 +456,35 @@ class VentanaProducto(QDialog):
         poner_clase(btn_cancelar, "secundario")
         btn_cancelar.clicked.connect(self.reject)
         fila_btn.addWidget(btn_cancelar)
-        btn_guardar = QPushButton("💾  Registrar producto")
-        btn_guardar.clicked.connect(self._guardar)
-        fila_btn.addWidget(btn_guardar)
+        self.btn_guardar = QPushButton("💾  Registrar producto")
+        self.btn_guardar.clicked.connect(self._guardar)
+        fila_btn.addWidget(self.btn_guardar)
         cuerpo.addLayout(fila_btn)
+
+        conectar_boton_a_validez(
+            self.btn_guardar,
+            [self.campo_nombre, self.campo_precio, self.campo_stock_minimo],
+        )
 
         centrar_ventana(self, 480, 420)
         self._actualizar_codigo_sugerido()
 
     def _actualizar_codigo_sugerido(self):
         with nueva_sesion() as db:
-            self.entrada_codigo.setText(siguiente_codigo(db, self.combo_tipo.currentText()))
+            self.campo_codigo.set(siguiente_codigo(db, self.campo_tipo.get()))
 
     def _guardar(self):
-        nombre = self.entrada_nombre.text().strip()
-        if not nombre:
-            self._msg.mostrar("El nombre es obligatorio.", "error")
+        # La validación en tiempo real ya mantiene "Guardar"
+        # deshabilitado mientras haya errores — este validar() final
+        # solo cubre el caso de un campo que el usuario nunca llegó a
+        # tocar (ej. hizo clic en Guardar sin pasar por el campo
+        # obligatorio vacío).
+        campos = (self.campo_nombre, self.campo_precio, self.campo_stock_minimo)
+        if not all(c.validar() for c in campos):
             return
-        try:
-            precio = float(self.entrada_precio.text() or 0)
-            stock_minimo = float(self.entrada_stock_minimo.text() or 0)
-        except ValueError:
-            self._msg.mostrar("El precio y el stock mínimo deben ser números válidos.", "error")
-            return
+        nombre = self.campo_nombre.get()
+        precio = self.campo_precio.valor_numero()
+        stock_minimo = self.campo_stock_minimo.valor_numero()
 
         with nueva_sesion() as db:
             # Se regenera el código aquí mismo, en vez de confiar en el
@@ -503,10 +493,10 @@ class VentanaProducto(QDialog):
             # registró un producto del mismo tipo mientras este diálogo
             # estaba abierto, el código sugerido podría haber quedado
             # desactualizado. Así nunca puede chocar con uno existente.
-            codigo = siguiente_codigo(db, self.combo_tipo.currentText())
+            codigo = siguiente_codigo(db, self.campo_tipo.get())
             db.add(Producto(
-                codigo=codigo, nombre=nombre, tipo=self.combo_tipo.currentText(),
-                unidad_medida=self.entrada_unidad.text().strip(),
+                codigo=codigo, nombre=nombre, tipo=self.campo_tipo.get(),
+                unidad_medida=self.campo_unidad.get(),
                 precio_venta=precio, stock_minimo=stock_minimo, activo=True,
             ))
             db.commit()

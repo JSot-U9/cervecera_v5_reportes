@@ -21,6 +21,7 @@ from app.logica_produccion import (
 from app.ui.widgets import (
     EncabezadoModulo, BarraBusqueda, TablaDatos, SeccionFormulario, MensajeEstado,
     centrar_ventana, formatear_estado, tag_para_estado, BotonAyuda, EstadoVacio,
+    CampoFormulario, conectar_boton_a_validez,
 )
 from app.ui.estilos import COLOR_TEXTO_SECUNDARIO, COLOR_PRIMARIO, fuente, poner_clase, fondo
 
@@ -220,12 +221,11 @@ class VentanaNuevaOrdenProduccion(QDialog):
         secl.addWidget(self.combo_receta)
         secl.addSpacing(8)
 
-        lbl_cant = QLabel("Cantidad planeada a producir *")
-        lbl_cant.setFont(fuente(9, negrita=True))
-        secl.addWidget(lbl_cant)
-        self.entrada_cantidad = QLineEdit()
-        self.entrada_cantidad.setFixedWidth(140)
-        secl.addWidget(self.entrada_cantidad)
+        self.campo_cantidad = CampoFormulario(
+            "Cantidad planeada a producir", obligatorio=True, tipo="numero",
+            permitir_negativo=False, permitir_cero=False)
+        self.campo_cantidad.setFixedWidth(180)
+        secl.addWidget(self.campo_cantidad)
 
         sec_lote = SeccionFormulario("Número de lote")
         sll = QVBoxLayout(sec_lote)
@@ -234,14 +234,15 @@ class VentanaNuevaOrdenProduccion(QDialog):
         lbl_auto.setStyleSheet(f"color: {COLOR_TEXTO_SECUNDARIO};")
         lbl_auto.setFont(fuente(8, cursiva=True))
         sll.addWidget(lbl_auto)
-        self.entrada_lote = QLineEdit(numero_lote_auto)
-        sll.addWidget(self.entrada_lote)
+        self.campo_lote = CampoFormulario("Número de lote", obligatorio=True)
+        self.campo_lote.set(numero_lote_auto)
+        sll.addWidget(self.campo_lote)
 
         sec_obs = SeccionFormulario("Observaciones")
         sol = QVBoxLayout(sec_obs)
         cuerpo.addWidget(sec_obs)
-        self.entrada_observaciones = QLineEdit()
-        sol.addWidget(self.entrada_observaciones)
+        self.campo_observaciones = CampoFormulario("Observaciones")
+        sol.addWidget(self.campo_observaciones)
         lbl_opt = QLabel("Opcional")
         lbl_opt.setStyleSheet(f"color: {COLOR_TEXTO_SECUNDARIO};")
         lbl_opt.setFont(fuente(8, cursiva=True))
@@ -259,34 +260,42 @@ class VentanaNuevaOrdenProduccion(QDialog):
         poner_clase(btn_cancelar, "secundario")
         btn_cancelar.clicked.connect(self.reject)
         fila_btn.addWidget(btn_cancelar)
-        btn_guardar = QPushButton("🍺  Crear orden")
-        btn_guardar.clicked.connect(self._guardar)
-        fila_btn.addWidget(btn_guardar)
+        self.btn_guardar = QPushButton("🍺  Crear orden")
+        self.btn_guardar.clicked.connect(self._guardar)
+        fila_btn.addWidget(self.btn_guardar)
         cuerpo.addLayout(fila_btn)
 
+        conectar_boton_a_validez(
+            self.btn_guardar, [self.campo_cantidad, self.campo_lote])
+        self.combo_receta.currentIndexChanged.connect(self._actualizar_estado_boton_guardar)
+        self._actualizar_estado_boton_guardar()
+
         centrar_ventana(self, 500, 480)
+
+    def _actualizar_estado_boton_guardar(self):
+        """conectar_boton_a_validez ya cubre cantidad/lote; la receta
+        es una selección (no un CampoFormulario), así que se revisa
+        acá y se combina con lo que ya decidió conectar_boton_a_validez
+        — sin pisar esa validación."""
+        tiene_receta = self.combo_receta.currentData() is not None
+        campos_validos = self.campo_cantidad.es_valido() and self.campo_lote.es_valido()
+        self.btn_guardar.setEnabled(tiene_receta and campos_validos)
 
     def _guardar(self):
         receta_id = self.combo_receta.currentData()
         if receta_id is None:
             self._msg.mostrar("Selecciona una receta de cerveza.", "error")
             return
-        numero_lote = self.entrada_lote.text().strip()
-        if not numero_lote:
-            self._msg.mostrar("El número de lote es obligatorio.", "error")
+        campos = (self.campo_cantidad, self.campo_lote)
+        if not all(c.validar() for c in campos):
             return
-        try:
-            cantidad = float(self.entrada_cantidad.text())
-            if cantidad <= 0:
-                raise ValueError
-        except ValueError:
-            self._msg.mostrar("La cantidad planeada debe ser un número mayor que 0.", "error")
-            return
+        cantidad = self.campo_cantidad.valor_numero()
+        numero_lote = self.campo_lote.get()
 
         try:
             orden = crear_orden(
                 receta_id=receta_id, cantidad_planeada=cantidad, numero_lote=numero_lote,
-                observaciones=self.entrada_observaciones.text().strip(),
+                observaciones=self.campo_observaciones.get(),
                 usuario_id=sesion_actual.usuario_id,
             )
         except Exception as error:
@@ -360,52 +369,48 @@ class VentanaCerrarOrden(QDialog):
         f1 = QHBoxLayout()
         spl.addLayout(f1)
         c1 = QVBoxLayout()
-        lbl_c1 = QLabel("Cantidad real producida *")
-        lbl_c1.setFont(fuente(9, negrita=True))
-        c1.addWidget(lbl_c1)
-        self.entrada_cantidad_real = QLineEdit()
-        self.entrada_cantidad_real.setFixedWidth(120)
-        self.entrada_cantidad_real.textEdited.connect(self._al_cambiar_cantidad_real)
-        c1.addWidget(self.entrada_cantidad_real)
+        self.campo_cantidad_real = CampoFormulario(
+            "Cantidad real producida", obligatorio=True, tipo="numero",
+            permitir_negativo=False, permitir_cero=False)
+        self.campo_cantidad_real.setFixedWidth(150)
+        self.campo_cantidad_real.widget.textEdited.connect(self._al_cambiar_cantidad_real)
+        c1.addWidget(self.campo_cantidad_real)
         f1.addLayout(c1)
 
         c2 = QVBoxLayout()
-        lbl_c2 = QLabel("Cantidad de merma")
-        c2.addWidget(lbl_c2)
-        self.entrada_merma = QLineEdit("0")
-        self.entrada_merma.setFixedWidth(120)
+        self.campo_merma = CampoFormulario("Cantidad de merma", tipo="numero", permitir_negativo=False)
+        self.campo_merma.set("0")
+        self.campo_merma.setFixedWidth(150)
         # textEdited (a diferencia de textChanged) solo se dispara
         # cuando el USUARIO teclea, no cuando el código llama a
         # setText(...) para autocompletar — así se puede distinguir
         # "el sistema sugirió esto" de "el usuario lo corrigió a mano".
-        self.entrada_merma.textEdited.connect(self._marcar_merma_editada)
-        c2.addWidget(self.entrada_merma)
+        self.campo_merma.widget.textEdited.connect(self._marcar_merma_editada)
+        c2.addWidget(self.campo_merma)
         f1.addLayout(c2)
         f1.addStretch()
 
-        lbl_causa = QLabel("Causa de la merma (dejar en blanco si no hubo)")
-        spl.addWidget(lbl_causa)
-        self.entrada_causa_merma = QLineEdit()
-        spl.addWidget(self.entrada_causa_merma)
+        self.campo_causa_merma = CampoFormulario("Causa de la merma (dejar en blanco si no hubo)")
+        spl.addWidget(self.campo_causa_merma)
 
         sec_costos = SeccionFormulario("Costos adicionales")
         scl = QHBoxLayout(sec_costos)
         cuerpo.addWidget(sec_costos)
 
         c3 = QVBoxLayout()
-        lbl_c3 = QLabel("Mano de obra (S/)")
-        c3.addWidget(lbl_c3)
-        self.entrada_mano_obra = QLineEdit("0")
-        self.entrada_mano_obra.setFixedWidth(120)
-        c3.addWidget(self.entrada_mano_obra)
+        self.campo_mano_obra = CampoFormulario(
+            "Mano de obra (S/)", tipo="numero", permitir_negativo=False)
+        self.campo_mano_obra.set("0")
+        self.campo_mano_obra.setFixedWidth(150)
+        c3.addWidget(self.campo_mano_obra)
         scl.addLayout(c3)
 
         c4 = QVBoxLayout()
-        lbl_c4 = QLabel("Costos indirectos (S/)")
-        c4.addWidget(lbl_c4)
-        self.entrada_indirectos = QLineEdit("0")
-        self.entrada_indirectos.setFixedWidth(120)
-        c4.addWidget(self.entrada_indirectos)
+        self.campo_indirectos = CampoFormulario(
+            "Costos indirectos (S/)", tipo="numero", permitir_negativo=False)
+        self.campo_indirectos.set("0")
+        self.campo_indirectos.setFixedWidth(150)
+        c4.addWidget(self.campo_indirectos)
         lbl_hint = QLabel("Energía, agua, etc.")
         lbl_hint.setStyleSheet(f"color: {COLOR_TEXTO_SECUNDARIO};")
         lbl_hint.setFont(fuente(8, cursiva=True))
@@ -425,11 +430,16 @@ class VentanaCerrarOrden(QDialog):
         poner_clase(btn_cancelar, "secundario")
         btn_cancelar.clicked.connect(self.reject)
         fila_btn.addWidget(btn_cancelar)
-        btn_guardar = QPushButton("✔  Cerrar y costear orden")
-        btn_guardar.clicked.connect(self._guardar)
-        fila_btn.addWidget(btn_guardar)
+        self.btn_guardar = QPushButton("✔  Cerrar y costear orden")
+        self.btn_guardar.clicked.connect(self._guardar)
+        fila_btn.addWidget(self.btn_guardar)
         cuerpo.addLayout(fila_btn)
 
+        conectar_boton_a_validez(
+            self.btn_guardar,
+            [self.campo_cantidad_real, self.campo_merma,
+             self.campo_mano_obra, self.campo_indirectos],
+        )
         centrar_ventana(self, 500, 560)
 
     def _marcar_merma_editada(self, _texto: str):
@@ -443,28 +453,24 @@ class VentanaCerrarOrden(QDialog):
         except ValueError:
             return
         merma_sugerida = max(0.0, self.cantidad_planeada - cantidad_real)
-        # setText no dispara textEdited, así que esto no se confunde
+        # set() no dispara textEdited, así que esto no se confunde
         # con una edición manual del usuario.
-        self.entrada_merma.setText(f"{merma_sugerida:.2f}")
+        self.campo_merma.set(f"{merma_sugerida:.2f}")
 
     def _guardar(self):
-        try:
-            cantidad_real = float(self.entrada_cantidad_real.text())
-            merma = float(self.entrada_merma.text() or 0)
-            mano_obra = float(self.entrada_mano_obra.text() or 0)
-            indirectos = float(self.entrada_indirectos.text() or 0)
-            if cantidad_real <= 0:
-                raise ValueError
-        except ValueError:
-            self._msg.mostrar(
-                "Revisa que la cantidad real sea mayor que 0 y todos los números sean válidos.",
-                "error")
+        campos = (self.campo_cantidad_real, self.campo_merma,
+                  self.campo_mano_obra, self.campo_indirectos)
+        if not all(c.validar() for c in campos):
             return
+        cantidad_real = self.campo_cantidad_real.valor_numero()
+        merma = self.campo_merma.valor_numero()
+        mano_obra = self.campo_mano_obra.valor_numero()
+        indirectos = self.campo_indirectos.valor_numero()
 
         try:
             orden = cerrar_orden(
                 orden_id=self.orden_id, cantidad_real=cantidad_real, cantidad_merma=merma,
-                causa_merma=self.entrada_causa_merma.text().strip(),
+                causa_merma=self.campo_causa_merma.get(),
                 costo_mano_obra=mano_obra, costos_indirectos=indirectos,
                 usuario_id=sesion_actual.usuario_id,
             )

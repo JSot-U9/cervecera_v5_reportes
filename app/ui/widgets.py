@@ -13,7 +13,8 @@ Componentes:
   - texto_pestana_legible: "🗂  Lotes FIFO" -> "Lotes FIFO"
   - EstadoVacio          : mensaje de tabla/lista sin datos (con acción sugerida)
   - SeccionFormulario    : QGroupBox estilizado para agrupar campos
-  - CampoFormulario      : label + entry/combobox con validación inline
+  - CampoFormulario      : label + entry/combobox con validación inline en tiempo real
+  - conectar_boton_a_validez : deshabilita "Guardar" mientras algún CampoFormulario tenga error
   - DialogoConfirmacion / confirmar : diálogo modal sí/no
   - MensajeEstado        : banda de mensaje éxito/error/advertencia
   - BarraEstado          : barra inferior con usuario/rol
@@ -563,14 +564,50 @@ class BotonAyuda(QPushButton):
 # ══════════════════════════════════════════════════════════════════
 
 class CampoFormulario(QWidget):
-    """Label + Entry/Combobox con mensaje de error inline."""
+    """Label + Entry/Combobox con validación en tiempo real y mensaje
+    de error inline debajo del campo específico.
+
+    Antes esto solo validaba "obligatorio", y únicamente cuando el
+    formulario contenedor llamaba a validar() a mano — típicamente
+    recién al presionar "Guardar". Ahora el campo se valida SOLO en
+    cuanto el usuario sale de él (editingFinished) o deja de escribir
+    un momento (mismo patrón de debounce con QTimer que ya usa la
+    búsqueda global del header), y avisa su estado a través de la
+    señal estadoValidez para que el formulario pueda deshabilitar
+    "Guardar" reactivamente (ver conectar_boton_a_validez más abajo)
+    en vez de dejar que el usuario descubra el error recién al
+    intentar guardar.
+
+    tipo:
+      "entry"     (por defecto) texto libre.
+      "numero"    valida que el texto sea un número. Por defecto
+                  rechaza negativos (permitir_negativo=False) — stock
+                  mínimo, cantidades y precios nunca tienen sentido en
+                  negativo; pasar permitir_negativo=True para los
+                  pocos casos donde sí aplica.
+      "combobox"  selector de opciones fijas (la validación numérica
+                  no aplica; sigue soportando obligatorio).
+
+    validador_extra: función opcional validador_extra(valor: str) ->
+    str | None que reutiliza una regla de negocio YA existente en
+    logica_*.py (nunca una nueva inventada acá) y devuelve el mensaje
+    de error tal cual lo daría el backend, o None si es válido.
+    """
+
+    estadoValidez = Signal(bool)  # True = campo válido en este momento
 
     def __init__(self, etiqueta: str, obligatorio: bool = False,
                  tipo: str = "entry", opciones: list = None,
-                 readonly: bool = False, parent=None):
+                 readonly: bool = False, permitir_negativo: bool = False,
+                 permitir_cero: bool = True, validador_extra=None, parent=None):
         super().__init__(parent)
         self._obligatorio = obligatorio
         self._tipo = tipo
+        self._readonly = readonly
+        self._permitir_negativo = permitir_negativo
+        self._permitir_cero = permitir_cero
+        self._validador_extra = validador_extra
+        self._valido = True
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -593,6 +630,7 @@ class CampoFormulario(QWidget):
         self._lbl_error = QLabel("")
         self._lbl_error.setStyleSheet(f"color: {COLOR_ALERTA};")
         self._lbl_error.setFont(fuente(8))
+        self._lbl_error.setWordWrap(True)
         layout.addWidget(self._lbl_error)
 
         if readonly:
@@ -600,6 +638,27 @@ class CampoFormulario(QWidget):
             lbl_auto.setStyleSheet(f"color: {COLOR_TEXTO_SECUNDARIO};")
             lbl_auto.setFont(fuente(8, cursiva=True))
             layout.addWidget(lbl_auto)
+
+        # ── Validación en tiempo real (no aplica a campos readonly:
+        # no hay nada que el usuario pueda escribir mal ahí) ────────
+        if not readonly:
+            if tipo == "combobox":
+                self.widget.currentTextChanged.connect(lambda _texto: self._validar(mostrar=True))
+            else:
+                self._temporizador = QTimer(self)
+                self._temporizador.setSingleShot(True)
+                self._temporizador.setInterval(600)
+                self._temporizador.timeout.connect(lambda: self._validar(mostrar=True))
+                self.widget.textChanged.connect(lambda _texto: self._temporizador.start())
+                self.widget.editingFinished.connect(lambda: self._validar(mostrar=True))
+
+        # Estado inicial: se calcula en silencio (sin pintar el error
+        # todavía — recién se muestra el formulario, no hay por qué
+        # gritarle al usuario que un campo obligatorio vacío está
+        # "mal" antes de que haya tenido oportunidad de llenarlo),
+        # pero el formulario contenedor sí necesita saber desde el
+        # arranque si puede guardar o no.
+        self._validar(mostrar=False)
 
     def get(self) -> str:
         if self._tipo == "combobox":
@@ -611,6 +670,17 @@ class CampoFormulario(QWidget):
             self.widget.setCurrentText(str(valor))
         else:
             self.widget.setText(str(valor))
+        self._validar(mostrar=False)
+
+    def valor_numero(self) -> float:
+        """Solo para tipo="numero": el valor ya convertido a float (0.0
+        si el campo está vacío). Usar esto en vez de float(campo.get())
+        evita repetir el mismo parseo/try-except en cada formulario."""
+        texto = self.get().replace(",", ".")
+        return float(texto) if texto else 0.0
+
+    def es_valido(self) -> bool:
+        return self._valido
 
     def mostrar_error(self, mensaje: str):
         self._lbl_error.setText(f"❌ {mensaje}")
@@ -618,12 +688,54 @@ class CampoFormulario(QWidget):
     def limpiar_error(self):
         self._lbl_error.setText("")
 
+    def _mensaje_error(self) -> str | None:
+        valor = self.get()
+        if self._obligatorio and not valor:
+            return "Este campo es obligatorio."
+        if valor and self._tipo == "numero":
+            try:
+                numero = float(valor.replace(",", "."))
+            except ValueError:
+                return "Debe ser un número válido."
+            if not self._permitir_negativo and numero < 0:
+                return "No puede ser negativo."
+            if not self._permitir_cero and numero == 0:
+                return "Debe ser mayor a 0."
+        if valor and self._validador_extra is not None:
+            return self._validador_extra(valor)
+        return None
+
+    def _validar(self, mostrar: bool) -> bool:
+        error = self._mensaje_error()
+        self._valido = error is None
+        if mostrar:
+            if error:
+                self.mostrar_error(error)
+            else:
+                self.limpiar_error()
+        self.estadoValidez.emit(self._valido)
+        return self._valido
+
     def validar(self) -> bool:
-        if self._obligatorio and not self.get():
-            self.mostrar_error("Este campo es obligatorio")
-            return False
-        self.limpiar_error()
-        return True
+        """Validación explícita e inmediata (ej. justo antes de
+        guardar): a diferencia de la validación automática, esta
+        SIEMPRE muestra el error si lo hay, incluso en un campo que
+        el usuario nunca llegó a tocar."""
+        return self._validar(mostrar=True)
+
+
+def conectar_boton_a_validez(boton, campos: list):
+    """Conecta un botón "Guardar" para que quede deshabilitado
+    mientras cualquiera de `campos` (CampoFormulario) tenga un error,
+    y se reactive solo en cuanto todos queden válidos — sin esperar a
+    que el usuario intente guardar para enterarse de que algo está
+    mal. Se revisa apenas se conecta, así el botón arranca en el
+    estado correcto sin depender de una primera interacción."""
+    def _revisar(_valido=None):
+        boton.setEnabled(all(c.es_valido() for c in campos))
+    for campo in campos:
+        campo.estadoValidez.connect(_revisar)
+    _revisar()
 
 
 # ══════════════════════════════════════════════════════════════════

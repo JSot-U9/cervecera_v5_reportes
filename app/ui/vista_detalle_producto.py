@@ -36,6 +36,7 @@ from app.logica_inventario import stock_total, actualizar_producto
 from app.ui.widgets import (
     TarjetaKPI, Migaja, TablaDatos, SeccionFormulario, MensajeEstado,
     formatear_estado, tag_para_estado, EstadoVacio, ejecutar_con_carga,
+    CampoFormulario, conectar_boton_a_validez,
 )
 from app.ui.estilos import COLOR_TEXTO_SECUNDARIO, COLOR_PRIMARIO, fuente, poner_clase
 
@@ -110,36 +111,26 @@ class VistaDetalleProducto(QWidget):
         pl.addWidget(self._msg_info)
 
         sec = SeccionFormulario("Datos del producto")
-        secl = QGridLayout(sec)
-        secl.setColumnStretch(1, 1)
+        secl = QVBoxLayout(sec)
         pl.addWidget(sec)
 
-        self.entrada_codigo = QLineEdit()
-        self.entrada_codigo.setReadOnly(True)
-        self.entrada_codigo.setStyleSheet(f"color: {COLOR_TEXTO_SECUNDARIO};")
-        self.entrada_tipo = QLineEdit()
-        self.entrada_tipo.setReadOnly(True)
-        self.entrada_tipo.setStyleSheet(f"color: {COLOR_TEXTO_SECUNDARIO};")
-        self.entrada_nombre = QLineEdit()
-        self.entrada_unidad = QLineEdit()
-        self.entrada_precio = QLineEdit()
-        self.entrada_stock_minimo = QLineEdit()
-        self.entrada_descripcion = QLineEdit()
+        self.campo_codigo = CampoFormulario("Código (no editable)", readonly=True)
+        self.campo_tipo_info = CampoFormulario("Tipo (no editable)", readonly=True)
+        self.campo_nombre = CampoFormulario("Nombre", obligatorio=True)
+        self.campo_unidad = CampoFormulario("Unidad de medida")
+        self.campo_precio = CampoFormulario(
+            "Precio de venta (S/)", tipo="numero", permitir_negativo=False)
+        self.campo_stock_minimo = CampoFormulario(
+            "Stock mínimo", tipo="numero", permitir_negativo=False)
+        self.campo_descripcion = CampoFormulario("Descripción")
 
-        filas = [
-            ("Código (no editable)", self.entrada_codigo),
-            ("Tipo (no editable)", self.entrada_tipo),
-            ("Nombre *", self.entrada_nombre),
-            ("Unidad de medida", self.entrada_unidad),
-            ("Precio de venta (S/)", self.entrada_precio),
-            ("Stock mínimo", self.entrada_stock_minimo),
-            ("Descripción", self.entrada_descripcion),
-        ]
-        for i, (etiqueta, widget) in enumerate(filas):
-            lbl = QLabel(etiqueta)
-            lbl.setFont(fuente(9, negrita=True))
-            secl.addWidget(lbl, i, 0)
-            secl.addWidget(widget, i, 1)
+        self._campos_info = (
+            self.campo_codigo, self.campo_tipo_info, self.campo_nombre,
+            self.campo_unidad, self.campo_precio, self.campo_stock_minimo,
+            self.campo_descripcion,
+        )
+        for campo in self._campos_info:
+            secl.addWidget(campo)
 
         lbl_nota = QLabel(
             "El código y el tipo se fijan al crear el producto y no se pueden "
@@ -158,6 +149,15 @@ class VistaDetalleProducto(QWidget):
         self.btn_guardar_info.clicked.connect(self._guardar_informacion)
         fila_btn.addWidget(self.btn_guardar_info)
         pl.addLayout(fila_btn)
+
+        # Los campos de solo lectura (código, tipo) quedan afuera:
+        # nunca pueden estar "mal", así que nunca deben bloquear el
+        # guardado.
+        conectar_boton_a_validez(
+            self.btn_guardar_info,
+            [self.campo_nombre, self.campo_unidad, self.campo_precio,
+             self.campo_stock_minimo, self.campo_descripcion],
+        )
 
     def _pestana_lotes(self):
         pestana = QWidget()
@@ -343,16 +343,16 @@ class VistaDetalleProducto(QWidget):
 
         # ── Pestaña Información ─────────────────────────────────
         self._puede_editar_info = puede(sesion_actual.rol, "inventario", "entrada")
-        self.entrada_codigo.setText(codigo)
-        self.entrada_tipo.setText(tipo)
-        self.entrada_nombre.setText(nombre)
-        self.entrada_unidad.setText(unidad)
-        self.entrada_precio.setText(f"{precio:.2f}")
-        self.entrada_stock_minimo.setText(f"{stock_minimo:.2f}")
-        self.entrada_descripcion.setText(descripcion)
-        for campo in (self.entrada_nombre, self.entrada_unidad, self.entrada_precio,
-                      self.entrada_stock_minimo, self.entrada_descripcion):
-            campo.setReadOnly(not self._puede_editar_info)
+        self.campo_codigo.set(codigo)
+        self.campo_tipo_info.set(tipo)
+        self.campo_nombre.set(nombre)
+        self.campo_unidad.set(unidad)
+        self.campo_precio.set(f"{precio:.2f}")
+        self.campo_stock_minimo.set(f"{stock_minimo:.2f}")
+        self.campo_descripcion.set(descripcion)
+        for campo in (self.campo_nombre, self.campo_unidad, self.campo_precio,
+                      self.campo_stock_minimo, self.campo_descripcion):
+            campo.widget.setReadOnly(not self._puede_editar_info)
         self.btn_guardar_info.setVisible(self._puede_editar_info)
         self._msg_info._ocultar()
 
@@ -397,21 +397,21 @@ class VistaDetalleProducto(QWidget):
     def _guardar_informacion(self):
         if not self._puede_editar_info or self.producto_id is None:
             return
-        try:
-            precio = float(self.entrada_precio.text() or 0)
-            stock_minimo = float(self.entrada_stock_minimo.text() or 0)
-        except ValueError:
-            self._msg_info.mostrar("El precio y el stock mínimo deben ser números válidos.", "error")
+        campos = (self.campo_nombre, self.campo_unidad, self.campo_precio,
+                  self.campo_stock_minimo, self.campo_descripcion)
+        if not all(c.validar() for c in campos):
             return
+        precio = self.campo_precio.valor_numero()
+        stock_minimo = self.campo_stock_minimo.valor_numero()
         with nueva_sesion() as db:
             try:
                 actualizar_producto(
                     db, self.producto_id,
-                    nombre=self.entrada_nombre.text(),
-                    unidad_medida=self.entrada_unidad.text(),
+                    nombre=self.campo_nombre.get(),
+                    unidad_medida=self.campo_unidad.get(),
                     precio_venta=precio,
                     stock_minimo=stock_minimo,
-                    descripcion=self.entrada_descripcion.text(),
+                    descripcion=self.campo_descripcion.get(),
                 )
                 db.commit()
             except ValueError as error:

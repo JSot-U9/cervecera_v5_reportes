@@ -21,6 +21,7 @@ from app.logica_inventario import StockInsuficiente
 from app.ui.widgets import (
     EncabezadoModulo, BarraBusqueda, TablaDatos, SeccionFormulario, MensajeEstado,
     centrar_ventana, EstadoVacio, conectar_pestanas_a_header,
+    CampoFormulario, conectar_boton_a_validez,
 )
 from app.ui.estilos import COLOR_TEXTO_SECUNDARIO, COLOR_PRIMARIO, COLOR_EXITO, fuente, poner_clase, fondo
 
@@ -204,31 +205,25 @@ class VentanaCliente(QDialog):
         cuerpo.addWidget(self._msg)
 
         sec = SeccionFormulario("Datos del cliente")
-        secl = QGridLayout(sec)
-        secl.setColumnStretch(1, 1)
+        secl = QVBoxLayout(sec)
         cuerpo.addWidget(sec)
 
-        self.combo_tipo = QComboBox()
-        self.combo_tipo.addItems(["NATURAL", "JURIDICA"])
+        self.campo_tipo = CampoFormulario(
+            "Tipo de persona", tipo="combobox", opciones=["NATURAL", "JURIDICA"])
         if datos.get("tipo") in ("NATURAL", "JURIDICA"):
-            self.combo_tipo.setCurrentText(datos["tipo"])
-        self.entrada_nombre = QLineEdit(datos.get("nombre", ""))
-        self.entrada_documento = QLineEdit(datos.get("documento", ""))
-        self.entrada_telefono = QLineEdit(datos.get("telefono", ""))
-        self.entrada_email = QLineEdit(datos.get("email", ""))
+            self.campo_tipo.set(datos["tipo"])
+        self.campo_nombre = CampoFormulario("Nombre / Razón social", obligatorio=True)
+        self.campo_nombre.set(datos.get("nombre", ""))
+        self.campo_documento = CampoFormulario("N° de documento (DNI o RUC)")
+        self.campo_documento.set(datos.get("documento", ""))
+        self.campo_telefono = CampoFormulario("Teléfono")
+        self.campo_telefono.set(datos.get("telefono", ""))
+        self.campo_email = CampoFormulario("Correo electrónico")
+        self.campo_email.set(datos.get("email", ""))
 
-        campos = [
-            ("Tipo de persona", self.combo_tipo, False),
-            ("Nombre / Razón social *", self.entrada_nombre, True),
-            ("N° de documento (DNI o RUC)", self.entrada_documento, False),
-            ("Teléfono", self.entrada_telefono, False),
-            ("Correo electrónico", self.entrada_email, False),
-        ]
-        for i, (etiqueta, widget, obligatorio) in enumerate(campos):
-            lbl = QLabel(etiqueta)
-            lbl.setFont(fuente(9, negrita=obligatorio))
-            secl.addWidget(lbl, i, 0)
-            secl.addWidget(widget, i, 1)
+        for campo in (self.campo_tipo, self.campo_nombre, self.campo_documento,
+                      self.campo_telefono, self.campo_email):
+            secl.addWidget(campo)
 
         lbl_nota = QLabel("* Campo obligatorio")
         lbl_nota.setStyleSheet(f"color: {COLOR_TEXTO_SECUNDARIO};")
@@ -242,23 +237,22 @@ class VentanaCliente(QDialog):
         poner_clase(btn_cancelar, "secundario")
         btn_cancelar.clicked.connect(self.reject)
         fila_btn.addWidget(btn_cancelar)
-        btn_guardar = QPushButton("💾  Guardar cliente")
-        btn_guardar.clicked.connect(self._guardar)
-        fila_btn.addWidget(btn_guardar)
+        self.btn_guardar = QPushButton("💾  Guardar cliente")
+        self.btn_guardar.clicked.connect(self._guardar)
+        fila_btn.addWidget(self.btn_guardar)
         cuerpo.addLayout(fila_btn)
 
+        conectar_boton_a_validez(self.btn_guardar, [self.campo_nombre])
         centrar_ventana(self, 460, 380)
 
     def _guardar(self):
-        nombre = self.entrada_nombre.text().strip()
-        if not nombre:
-            self._msg.mostrar("El nombre del cliente es obligatorio.", "error")
+        if not self.campo_nombre.validar():
             return
         datos = dict(
-            tipo=self.combo_tipo.currentText(), nombre=nombre,
-            documento=self.entrada_documento.text().strip(),
-            telefono=self.entrada_telefono.text().strip(),
-            email=self.entrada_email.text().strip(),
+            tipo=self.campo_tipo.get(), nombre=self.campo_nombre.get(),
+            documento=self.campo_documento.get(),
+            telefono=self.campo_telefono.get(),
+            email=self.campo_email.get(),
         )
         try:
             if self.cliente_id:
@@ -334,21 +328,18 @@ class VentanaNuevaVenta(QDialog):
         f_nums = QHBoxLayout()
         spl.addLayout(f_nums)
         col_cant = QVBoxLayout()
-        lbl_cant = QLabel("Cantidad *")
-        lbl_cant.setFont(fuente(9, negrita=True))
-        col_cant.addWidget(lbl_cant)
-        self.entrada_cantidad = QLineEdit()
-        self.entrada_cantidad.setFixedWidth(100)
-        col_cant.addWidget(self.entrada_cantidad)
+        self.campo_cantidad = CampoFormulario(
+            "Cantidad", obligatorio=True, tipo="numero",
+            permitir_negativo=False, permitir_cero=False)
+        self.campo_cantidad.setFixedWidth(110)
+        col_cant.addWidget(self.campo_cantidad)
         f_nums.addLayout(col_cant)
 
         col_precio = QVBoxLayout()
-        lbl_precio = QLabel("Precio unitario (S/)")
-        lbl_precio.setFont(fuente(9, negrita=True))
-        col_precio.addWidget(lbl_precio)
-        self.entrada_precio = QLineEdit()
-        self.entrada_precio.setFixedWidth(100)
-        col_precio.addWidget(self.entrada_precio)
+        self.campo_precio_venta = CampoFormulario(
+            "Precio unitario (S/)", obligatorio=True, tipo="numero", permitir_negativo=False)
+        self.campo_precio_venta.setFixedWidth(110)
+        col_precio.addWidget(self.campo_precio_venta)
         lbl_auto = QLabel("Autocompletado del catálogo")
         lbl_auto.setStyleSheet(f"color: {COLOR_TEXTO_SECUNDARIO};")
         lbl_auto.setFont(fuente(8, cursiva=True))
@@ -359,6 +350,9 @@ class VentanaNuevaVenta(QDialog):
         self.btn_agregar_item = QPushButton("＋  Agregar al carrito")
         self.btn_agregar_item.clicked.connect(self._agregar_item)
         spl.addWidget(self.btn_agregar_item, alignment=Qt.AlignLeft)
+
+        conectar_boton_a_validez(
+            self.btn_agregar_item, [self.campo_cantidad, self.campo_precio_venta])
 
         sec_carrito = SeccionFormulario("Carrito de venta")
         scarl = QVBoxLayout(sec_carrito)
@@ -401,10 +395,13 @@ class VentanaNuevaVenta(QDialog):
         poner_clase(btn_cancelar, "secundario")
         btn_cancelar.clicked.connect(self.reject)
         fila_btn.addWidget(btn_cancelar)
-        btn_guardar = QPushButton("💰  Registrar venta")
-        btn_guardar.clicked.connect(self._guardar_venta)
-        fila_btn.addWidget(btn_guardar)
+        self.btn_guardar = QPushButton("💰  Registrar venta")
+        self.btn_guardar.clicked.connect(self._guardar_venta)
+        fila_btn.addWidget(self.btn_guardar)
         cuerpo.addLayout(fila_btn)
+
+        self.combo_cliente.currentIndexChanged.connect(self._actualizar_estado_boton_guardar_venta)
+        self._actualizar_estado_boton_guardar_venta()
 
         centrar_ventana(self, 740, 600)
 
@@ -414,7 +411,7 @@ class VentanaNuevaVenta(QDialog):
             return
         for p in self.productos:
             if p.id == producto_id:
-                self.entrada_precio.setText(str(p.precio_venta))
+                self.campo_precio_venta.set(str(p.precio_venta))
                 break
 
     def _agregar_item(self):
@@ -422,26 +419,20 @@ class VentanaNuevaVenta(QDialog):
         if producto_id is None:
             self._msg.mostrar("Selecciona un producto antes de agregar.", "advertencia")
             return
-        try:
-            cantidad = float(self.entrada_cantidad.text())
-            precio = float(self.entrada_precio.text())
-            if cantidad <= 0:
-                raise ValueError("cantidad")
-            if precio < 0:
-                raise ValueError("precio")
-        except ValueError:
-            self._msg.mostrar(
-                "La cantidad debe ser mayor que 0 y el precio debe ser un número válido.", "error")
+        campos = (self.campo_cantidad, self.campo_precio_venta)
+        if not all(c.validar() for c in campos):
             return
+        cantidad = self.campo_cantidad.valor_numero()
+        precio = self.campo_precio_venta.valor_numero()
 
         self.items_agregados.append({
             "producto_id": producto_id, "cantidad": cantidad, "precio_unitario": precio,
         })
         self._msg.mostrar("Producto agregado al carrito.", "exito", 2000)
         self._refrescar_tabla_items()
-        self.entrada_cantidad.clear()
+        self.campo_cantidad.set("")
         self.combo_producto.setCurrentIndex(-1)
-        self.entrada_precio.clear()
+        self.campo_precio_venta.set("")
 
     def _refrescar_tabla_items(self):
         filas = []
@@ -457,6 +448,12 @@ class VentanaNuevaVenta(QDialog):
                 ])
         self.tabla_items.cargar_filas(filas)
         self.lbl_total.setText(f"TOTAL:  S/ {total:,.2f}")
+        self._actualizar_estado_boton_guardar_venta()
+
+    def _actualizar_estado_boton_guardar_venta(self):
+        tiene_cliente = self.combo_cliente.currentData() is not None
+        tiene_items = bool(self.items_agregados)
+        self.btn_guardar.setEnabled(tiene_cliente and tiene_items)
 
     def _quitar_item(self):
         fila = self.tabla_items.currentRow()

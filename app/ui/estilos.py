@@ -36,6 +36,8 @@ COLOR_SIDEBAR_SELECCIONADO = "#3A6019"  # verde vivo más oscuro — activo pers
 COLOR_TEXTO           = "#1B2A12"   # verde muy oscuro — texto principal
 COLOR_TEXTO_SECUNDARIO = "#5C6650"  # verde grisáceo — texto secundario
 
+COLOR_CAMPO_DESHABILITADO = "#E7E4D8"  # gris cálido claro — fondo de un campo de formulario bloqueado/solo lectura
+
 COLOR_EXITO           = "#1E8A3C"
 COLOR_ALERTA          = "#D62B1F"
 COLOR_ADVERTENCIA     = "#E8A100"

@@ -24,8 +24,22 @@ from app.logica_compras import (
 from app.ui.widgets import (
     EncabezadoModulo, BarraBusqueda, TablaDatos, SeccionFormulario, MensajeEstado,
     centrar_ventana, confirmar, EstadoVacio, conectar_pestanas_a_header,
+    CampoFormulario, conectar_boton_a_validez,
 )
 from app.ui.estilos import COLOR_TEXTO_SECUNDARIO, COLOR_PRIMARIO, fuente, poner_clase
+
+
+def _validar_fecha_iso(texto: str):
+    """validador_extra para CampoFormulario: mismo formato AAAA-MM-DD
+    que _agregar_item (VentanaNuevaOrden) siempre exigió para la fecha
+    de vencimiento — antes recién se avisaba al presionar "Agregar a
+    la orden"; ahora se avisa en cuanto el usuario termina de
+    escribirla."""
+    try:
+        datetime.strptime(texto, "%Y-%m-%d")
+    except ValueError:
+        return "Formato incorrecto. Usa AAAA-MM-DD (ej: 2027-06-30)."
+    return None
 
 
 class VistaCompras(QWidget):
@@ -233,25 +247,22 @@ class VentanaProveedor(QDialog):
         cuerpo.addWidget(self._msg)
 
         sec = SeccionFormulario("Información del proveedor")
-        secl = QGridLayout(sec)
-        secl.setColumnStretch(1, 1)
+        secl = QVBoxLayout(sec)
         cuerpo.addWidget(sec)
 
         campos = [
-            ("Razón social *", "razon_social", True),
+            ("Razón social", "razon_social", True),
             ("RUC", "ruc", False),
             ("Persona de contacto", "contacto", False),
             ("Teléfono", "telefono", False),
             ("Correo electrónico", "email", False),
         ]
         self._entradas = {}
-        for i, (etiqueta, clave, obligatorio) in enumerate(campos):
-            lbl_campo = QLabel(etiqueta)
-            lbl_campo.setFont(fuente(9, negrita=obligatorio))
-            secl.addWidget(lbl_campo, i, 0)
-            entrada = QLineEdit(datos.get(clave, ""))
-            secl.addWidget(entrada, i, 1)
-            self._entradas[clave] = entrada
+        for etiqueta, clave, obligatorio in campos:
+            campo = CampoFormulario(etiqueta, obligatorio=obligatorio)
+            campo.set(datos.get(clave, ""))
+            secl.addWidget(campo)
+            self._entradas[clave] = campo
 
         lbl_nota = QLabel("* Campo obligatorio")
         lbl_nota.setStyleSheet(f"color: {COLOR_TEXTO_SECUNDARIO};")
@@ -265,24 +276,24 @@ class VentanaProveedor(QDialog):
         poner_clase(btn_cancelar, "secundario")
         btn_cancelar.clicked.connect(self.reject)
         fila_btn.addWidget(btn_cancelar)
-        btn_guardar = QPushButton("💾  Guardar proveedor")
-        btn_guardar.clicked.connect(self._guardar)
-        fila_btn.addWidget(btn_guardar)
+        self.btn_guardar = QPushButton("💾  Guardar proveedor")
+        self.btn_guardar.clicked.connect(self._guardar)
+        fila_btn.addWidget(self.btn_guardar)
         cuerpo.addLayout(fila_btn)
 
+        conectar_boton_a_validez(self.btn_guardar, list(self._entradas.values()))
         centrar_ventana(self, 460, 380)
 
     def _guardar(self):
-        razon = self._entradas["razon_social"].text().strip()
-        if not razon:
-            self._msg.mostrar("La razón social es obligatoria.", "error")
+        campos = list(self._entradas.values())
+        if not all(c.validar() for c in campos):
             return
         datos = dict(
-            razon_social=razon,
-            ruc=self._entradas["ruc"].text().strip() or None,
-            contacto=self._entradas["contacto"].text().strip(),
-            telefono=self._entradas["telefono"].text().strip(),
-            email=self._entradas["email"].text().strip(),
+            razon_social=self._entradas["razon_social"].get(),
+            ruc=self._entradas["ruc"].get() or None,
+            contacto=self._entradas["contacto"].get(),
+            telefono=self._entradas["telefono"].get(),
+            email=self._entradas["email"].get(),
         )
         try:
             if self.proveedor_id:
@@ -448,21 +459,23 @@ class VentanaNuevaOrden(QDialog):
         spr.addLayout(f_nums)
 
         col_cant = QVBoxLayout()
-        lbl_cant = QLabel("Cantidad *")
-        lbl_cant.setFont(fuente(9, negrita=True))
-        col_cant.addWidget(lbl_cant)
-        self.entry_cantidad = QLineEdit()
-        self.entry_cantidad.setFixedWidth(100)
-        col_cant.addWidget(self.entry_cantidad)
+        self.campo_cantidad = CampoFormulario(
+            "Cantidad", obligatorio=True, tipo="numero",
+            permitir_negativo=False, permitir_cero=False)
+        self.campo_cantidad.setFixedWidth(110)
+        col_cant.addWidget(self.campo_cantidad)
         f_nums.addLayout(col_cant)
 
         col_precio = QVBoxLayout()
-        lbl_precio = QLabel("Precio unitario (S/)")
-        lbl_precio.setFont(fuente(9, negrita=True))
-        col_precio.addWidget(lbl_precio)
-        self.entry_precio = QLineEdit()
-        self.entry_precio.setFixedWidth(100)
-        col_precio.addWidget(self.entry_precio)
+        # Antes no tenía asterisco de obligatorio en la etiqueta, pero
+        # SÍ era obligatorio en los hechos: _agregar_item ya rompía con
+        # float("") si se dejaba vacío. Se deja explícito acá en vez de
+        # seguir dejando que el usuario lo descubra recién al intentar
+        # agregar el producto.
+        self.campo_precio_compra = CampoFormulario(
+            "Precio unitario (S/)", obligatorio=True, tipo="numero", permitir_negativo=False)
+        self.campo_precio_compra.setFixedWidth(110)
+        col_precio.addWidget(self.campo_precio_compra)
         self.lbl_precio_hint = QLabel("")
         self.lbl_precio_hint.setStyleSheet(f"color: {COLOR_TEXTO_SECUNDARIO};")
         self.lbl_precio_hint.setFont(fuente(8, cursiva=True))
@@ -470,19 +483,22 @@ class VentanaNuevaOrden(QDialog):
         f_nums.addLayout(col_precio)
 
         col_venc = QVBoxLayout()
-        lbl_venc = QLabel("Vencimiento (AAAA-MM-DD)")
-        lbl_venc.setFont(fuente(9))
-        col_venc.addWidget(lbl_venc)
-        self.entry_vencimiento = QLineEdit()
-        self.entry_vencimiento.setFixedWidth(120)
-        self.entry_vencimiento.setPlaceholderText("opcional")
-        col_venc.addWidget(self.entry_vencimiento)
+        self.campo_vencimiento = CampoFormulario(
+            "Vencimiento (AAAA-MM-DD)", validador_extra=_validar_fecha_iso)
+        self.campo_vencimiento.setFixedWidth(130)
+        self.campo_vencimiento.widget.setPlaceholderText("opcional")
+        col_venc.addWidget(self.campo_vencimiento)
         f_nums.addLayout(col_venc)
         f_nums.addStretch()
 
         self.btn_agregar_item = QPushButton("＋  Agregar a la orden")
         self.btn_agregar_item.clicked.connect(self._agregar_item)
         spr.addWidget(self.btn_agregar_item, alignment=Qt.AlignLeft)
+
+        conectar_boton_a_validez(
+            self.btn_agregar_item,
+            [self.campo_cantidad, self.campo_precio_compra, self.campo_vencimiento],
+        )
 
         # ── Tabla de items ────────────────────────────────────
         sec_tabla = SeccionFormulario("Productos en esta orden")
@@ -533,6 +549,9 @@ class VentanaNuevaOrden(QDialog):
         fila_btn.addWidget(self.btn_guardar)
         cuerpo.addLayout(fila_btn)
 
+        self.combo_proveedor.currentIndexChanged.connect(self._actualizar_estado_boton_guardar_orden)
+        self._actualizar_estado_boton_guardar_orden()
+
         centrar_ventana(self, 780, 640)
 
         if self._producto_preseleccionado is not None:
@@ -582,7 +601,7 @@ class VentanaNuevaOrden(QDialog):
             if idx >= 0:
                 self.combo_producto.setCurrentIndex(idx)
             if self._cantidad_sugerida:
-                self.entry_cantidad.setText(f"{self._cantidad_sugerida:.2f}")
+                self.campo_cantidad.set(f"{self._cantidad_sugerida:.2f}")
 
     def _autocompletar_precio(self):
         producto_id = self.combo_producto.currentData()
@@ -590,10 +609,10 @@ class VentanaNuevaOrden(QDialog):
             return
         ultimo = self._ultimos_precios.get(producto_id)
         if ultimo:
-            self.entry_precio.setText(f"{ultimo:.2f}")
+            self.campo_precio_compra.set(f"{ultimo:.2f}")
             self.lbl_precio_hint.setText("↑ último precio registrado")
         else:
-            self.entry_precio.setText("")
+            self.campo_precio_compra.set("")
             self.lbl_precio_hint.setText("(sin compra previa)")
 
     def _agregar_item(self):
@@ -601,27 +620,16 @@ class VentanaNuevaOrden(QDialog):
         if producto_id is None:
             self._msg.mostrar("Selecciona un producto antes de agregar.", "advertencia")
             return
-        try:
-            cantidad = float(self.entry_cantidad.text())
-            precio = float(self.entry_precio.text())
-            if cantidad <= 0:
-                raise ValueError("cantidad negativa")
-            if precio < 0:
-                raise ValueError("precio negativo")
-        except ValueError:
-            self._msg.mostrar(
-                "La cantidad debe ser mayor que 0 y el precio debe ser un número válido.", "error")
+        campos = (self.campo_cantidad, self.campo_precio_compra, self.campo_vencimiento)
+        if not all(c.validar() for c in campos):
             return
+        cantidad = self.campo_cantidad.valor_numero()
+        precio = self.campo_precio_compra.valor_numero()
 
-        texto_fecha = self.entry_vencimiento.text().strip()
-        fecha_vencimiento = None
-        if texto_fecha:
-            try:
-                fecha_vencimiento = datetime.strptime(texto_fecha, "%Y-%m-%d").date()
-            except ValueError:
-                self._msg.mostrar(
-                    "Formato de fecha incorrecto. Usa AAAA-MM-DD (ej: 2027-06-30).", "error")
-                return
+        texto_fecha = self.campo_vencimiento.get()
+        fecha_vencimiento = (
+            datetime.strptime(texto_fecha, "%Y-%m-%d").date() if texto_fecha else None
+        )
 
         self.items_agregados.append({
             "producto_id": producto_id, "cantidad": cantidad,
@@ -629,9 +637,9 @@ class VentanaNuevaOrden(QDialog):
         })
         self._msg.mostrar("Producto agregado a la orden.", "exito", 2000)
         self._refrescar_tabla_items()
-        self.entry_cantidad.clear()
-        self.entry_precio.clear()
-        self.entry_vencimiento.clear()
+        self.campo_cantidad.set("")
+        self.campo_precio_compra.set("")
+        self.campo_vencimiento.set("")
         self.lbl_precio_hint.setText("")
         self.combo_producto.setCurrentIndex(-1)
 
@@ -650,6 +658,17 @@ class VentanaNuevaOrden(QDialog):
                 ])
         self.tabla_items.cargar_filas(filas)
         self.lbl_total.setText(f"Total: S/ {total:,.2f}")
+        self._actualizar_estado_boton_guardar_orden()
+
+    def _actualizar_estado_boton_guardar_orden(self):
+        """Igual que conectar_boton_a_validez, pero para las dos
+        condiciones de esta orden que no son un CampoFormulario:
+        proveedor elegido y al menos un producto agregado. Antes el
+        usuario solo se enteraba de que faltaba alguna al presionar
+        "Guardar orden de compra"."""
+        tiene_proveedor = self.combo_proveedor.currentData() is not None
+        tiene_items = bool(self.items_agregados)
+        self.btn_guardar.setEnabled(tiene_proveedor and tiene_items)
 
     def _quitar_item(self):
         fila = self.tabla_items.currentRow()

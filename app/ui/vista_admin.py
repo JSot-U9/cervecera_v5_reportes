@@ -6,7 +6,7 @@ Cuentas de usuario · Configuración de la empresa · Registros de acceso.
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QWidget, QDialog, QVBoxLayout, QHBoxLayout, QGridLayout, QLabel,
-    QLineEdit, QComboBox, QPushButton, QTabWidget, QMessageBox,
+    QLineEdit, QComboBox, QPushButton, QTabWidget, QMessageBox, QScrollArea,
 )
 
 from app.basedatos import nueva_sesion
@@ -18,10 +18,11 @@ from app.logica_configuracion import obtener_datos_empresa, guardar_datos_empres
 from app.ui.widgets import (
     EncabezadoModulo, BarraBusqueda, TablaDatos, SeccionFormulario, MensajeEstado,
     centrar_ventana, confirmar, formatear_estado, tag_para_estado, EstadoVacio,
-    conectar_pestanas_a_header,
+    conectar_pestanas_a_header, CampoFormulario, conectar_boton_a_validez,
 )
 from app.ui.estilos import (
-    COLOR_TEXTO_SECUNDARIO, COLOR_PRIMARIO, COLOR_SIDEBAR, COLOR_TEXTO, fuente, poner_clase, fondo,
+    COLOR_TEXTO_SECUNDARIO, COLOR_PRIMARIO, COLOR_TEXTO, COLOR_CAMPO_DESHABILITADO,
+    fuente, poner_clase, fondo,
 )
 
 ROLES_DISPONIBLES = ["ADMIN", "COMPRAS", "INVENTARIO", "PRODUCCION", "VENTAS", "COSTOS"]
@@ -85,46 +86,68 @@ class VistaAdmin(QWidget):
     def _pestana_empresa(self):
         pestana = QWidget()
         pl = QVBoxLayout(pestana)
-        pl.setContentsMargins(20, 20, 20, 20)
+        pl.setContentsMargins(0, 0, 0, 0)
+        pl.setSpacing(0)
         self.notebook.addTab(pestana, "🏢  Empresa")
 
+        # En una ventana chica, 7 campos apilados uno debajo del otro no
+        # entraban ni se podían desplazar: se veían cortados o
+        # amontonados sin ninguna forma de llegar a los de más abajo.
+        # Con un QScrollArea (mismo patrón que ya usa el Dashboard) el
+        # contenido siempre queda accesible, sin importar el tamaño de
+        # la ventana.
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QScrollArea.NoFrame)
+        pl.addWidget(scroll, stretch=1)
+
+        cuerpo = QWidget()
+        scroll.setWidget(cuerpo)
+        cl = QVBoxLayout(cuerpo)
+        cl.setContentsMargins(20, 20, 20, 20)
+        cl.setSpacing(8)
+
         self._msg_empresa = MensajeEstado()
-        pl.addWidget(self._msg_empresa)
+        cl.addWidget(self._msg_empresa)
 
         lbl_info = QLabel("Estos datos aparecen en el encabezado de todos los reportes (PDF, Excel, CSV).")
         lbl_info.setStyleSheet(f"color: {COLOR_TEXTO_SECUNDARIO};")
         lbl_info.setFont(fuente(9, cursiva=True))
-        pl.addWidget(lbl_info)
-        pl.addSpacing(8)
+        lbl_info.setWordWrap(True)
+        cl.addWidget(lbl_info)
 
         sec = SeccionFormulario("Datos de la empresa")
+        # Antes los 7 campos iban uno debajo del otro (7 filas
+        # completas); en pares de a dos por fila ocupan bastante menos
+        # alto, así que se aprecian mejor incluso sin tener que
+        # desplazarse.
         secl = QGridLayout(sec)
+        secl.setHorizontalSpacing(16)
+        secl.setVerticalSpacing(4)
+        secl.setColumnStretch(0, 1)
         secl.setColumnStretch(1, 1)
-        pl.addWidget(sec)
+        cl.addWidget(sec)
 
         campos = [
-            ("empresa_nombre", "Nombre de la empresa *"),
-            ("empresa_ruc", "RUC / N° de identificación fiscal"),
-            ("empresa_direccion", "Dirección"),
-            ("empresa_ciudad", "Ciudad y País"),
-            ("empresa_telefono", "Teléfono"),
-            ("empresa_email", "Correo electrónico"),
-            ("empresa_web", "Sitio web"),
+            ("empresa_nombre", "Nombre de la empresa", True),
+            ("empresa_ruc", "RUC / N° de identificación fiscal", False),
+            ("empresa_direccion", "Dirección", False),
+            ("empresa_ciudad", "Ciudad y País", False),
+            ("empresa_telefono", "Teléfono", False),
+            ("empresa_email", "Correo electrónico", False),
+            ("empresa_web", "Sitio web", False),
         ]
         self._entradas_empresa = {}
-        for fila, (clave, etiqueta) in enumerate(campos):
-            lbl = QLabel(etiqueta)
-            lbl.setFont(fuente(9, negrita=("*" in etiqueta)))
-            secl.addWidget(lbl, fila, 0)
-            entrada = QLineEdit()
-            secl.addWidget(entrada, fila, 1)
-            self._entradas_empresa[clave] = entrada
+        for i, (clave, etiqueta, obligatorio) in enumerate(campos):
+            campo = CampoFormulario(etiqueta, obligatorio=obligatorio)
+            secl.addWidget(campo, i // 2, i % 2)
+            self._entradas_empresa[clave] = campo
 
         lbl_nota = QLabel("* Campo obligatorio")
         lbl_nota.setStyleSheet(f"color: {COLOR_TEXTO_SECUNDARIO};")
         lbl_nota.setFont(fuente(8, cursiva=True))
-        pl.addWidget(lbl_nota)
-        pl.addSpacing(4)
+        cl.addWidget(lbl_nota)
+        cl.addSpacing(4)
 
         # Sección "ADMINISTRACIÓN" del reporte de bugs: los campos se
         # podían editar directamente, sin ningún aviso ni confirmación
@@ -149,17 +172,18 @@ class VistaAdmin(QWidget):
         self.btn_guardar_empresa.setVisible(False)
         fila_botones.addWidget(self.btn_guardar_empresa)
         fila_botones.addStretch()
-        pl.addLayout(fila_botones)
-        pl.addStretch()
+        cl.addLayout(fila_botones)
+        cl.addStretch()
 
+        conectar_boton_a_validez(self.btn_guardar_empresa, list(self._entradas_empresa.values()))
         self._bloquear_campos_empresa(True)
         self._cargar_datos_empresa()
 
     def _bloquear_campos_empresa(self, bloqueado: bool):
-        for entrada in self._entradas_empresa.values():
-            entrada.setReadOnly(bloqueado)
-            entrada.setStyleSheet(
-                f"background-color: {COLOR_SIDEBAR if bloqueado else 'white'}; "
+        for campo in self._entradas_empresa.values():
+            campo.widget.setReadOnly(bloqueado)
+            campo.widget.setStyleSheet(
+                f"background-color: {COLOR_CAMPO_DESHABILITADO if bloqueado else 'white'}; "
                 f"color: {COLOR_TEXTO_SECUNDARIO if bloqueado else COLOR_TEXTO};"
             )
         self.btn_editar_empresa.setVisible(bloqueado)
@@ -178,14 +202,14 @@ class VistaAdmin(QWidget):
 
     def _cargar_datos_empresa(self):
         emp = obtener_datos_empresa()
-        for clave, entrada in self._entradas_empresa.items():
-            entrada.setText(emp.get(clave, ""))
+        for clave, campo in self._entradas_empresa.items():
+            campo.set(emp.get(clave, ""))
 
     def _guardar_empresa(self):
-        vals = {clave: entrada.text().strip() for clave, entrada in self._entradas_empresa.items()}
-        if not vals["empresa_nombre"]:
-            self._msg_empresa.mostrar("El nombre de la empresa es obligatorio.", "error")
+        campos = list(self._entradas_empresa.values())
+        if not all(c.validar() for c in campos):
             return
+        vals = {clave: campo.get() for clave, campo in self._entradas_empresa.items()}
         guardar_datos_empresa(
             nombre=vals["empresa_nombre"], ruc=vals["empresa_ruc"],
             direccion=vals["empresa_direccion"], telefono=vals["empresa_telefono"],
@@ -305,42 +329,31 @@ class VentanaNuevoUsuario(QDialog):
         cuerpo.addWidget(self._msg)
 
         sec = SeccionFormulario("Datos de la cuenta")
-        secl = QGridLayout(sec)
-        secl.setColumnStretch(1, 1)
+        secl = QVBoxLayout(sec)
         cuerpo.addWidget(sec)
 
-        lbl1 = QLabel("Nombre de usuario (login) *")
-        lbl1.setFont(fuente(9, negrita=True))
-        secl.addWidget(lbl1, 0, 0)
-        self.entrada_usuario = QLineEdit()
-        secl.addWidget(self.entrada_usuario, 0, 1)
+        self.campo_usuario = CampoFormulario("Nombre de usuario (login)", obligatorio=True)
+        self.campo_nombre = CampoFormulario("Nombre completo", obligatorio=True)
+        self.campo_contrasena = CampoFormulario(
+            "Contraseña inicial", obligatorio=True,
+            validador_extra=lambda v: (
+                "Debe tener al menos 4 caracteres." if len(v) < 4 else None
+            ),
+        )
+        self.campo_contrasena.widget.setEchoMode(QLineEdit.Password)
+        self.campo_rol = CampoFormulario(
+            "Rol", tipo="combobox", opciones=ROLES_DISPONIBLES)
+        self.campo_rol.widget.currentTextChanged.connect(self._actualizar_desc_rol)
 
-        lbl2 = QLabel("Nombre completo *")
-        lbl2.setFont(fuente(9, negrita=True))
-        secl.addWidget(lbl2, 1, 0)
-        self.entrada_nombre = QLineEdit()
-        secl.addWidget(self.entrada_nombre, 1, 1)
-
-        lbl3 = QLabel("Contraseña inicial *")
-        lbl3.setFont(fuente(9, negrita=True))
-        secl.addWidget(lbl3, 2, 0)
-        self.entrada_contrasena = QLineEdit()
-        self.entrada_contrasena.setEchoMode(QLineEdit.Password)
-        secl.addWidget(self.entrada_contrasena, 2, 1)
-
-        lbl4 = QLabel("Rol *")
-        lbl4.setFont(fuente(9, negrita=True))
-        secl.addWidget(lbl4, 3, 0)
-        self.combo_rol = QComboBox()
-        self.combo_rol.addItems(ROLES_DISPONIBLES)
-        self.combo_rol.currentTextChanged.connect(self._actualizar_desc_rol)
-        secl.addWidget(self.combo_rol, 3, 1)
+        for campo in (self.campo_usuario, self.campo_nombre,
+                      self.campo_contrasena, self.campo_rol):
+            secl.addWidget(campo)
 
         self._lbl_rol_desc = QLabel("")
         self._lbl_rol_desc.setStyleSheet(f"color: {COLOR_TEXTO_SECUNDARIO};")
         self._lbl_rol_desc.setFont(fuente(8, cursiva=True))
-        secl.addWidget(self._lbl_rol_desc, 4, 1)
-        self._actualizar_desc_rol(self.combo_rol.currentText())
+        secl.addWidget(self._lbl_rol_desc)
+        self._actualizar_desc_rol(self.campo_rol.get())
 
         lbl_nota = QLabel("* Campos obligatorios")
         lbl_nota.setStyleSheet(f"color: {COLOR_TEXTO_SECUNDARIO};")
@@ -354,29 +367,27 @@ class VentanaNuevoUsuario(QDialog):
         poner_clase(btn_cancelar, "secundario")
         btn_cancelar.clicked.connect(self.reject)
         fila_btn.addWidget(btn_cancelar)
-        btn_guardar = QPushButton("💾  Crear usuario")
-        btn_guardar.clicked.connect(self._guardar)
-        fila_btn.addWidget(btn_guardar)
+        self.btn_guardar = QPushButton("💾  Crear usuario")
+        self.btn_guardar.clicked.connect(self._guardar)
+        fila_btn.addWidget(self.btn_guardar)
         cuerpo.addLayout(fila_btn)
 
+        conectar_boton_a_validez(
+            self.btn_guardar,
+            [self.campo_usuario, self.campo_nombre, self.campo_contrasena],
+        )
         centrar_ventana(self, 480, 420)
 
     def _actualizar_desc_rol(self, rol):
         self._lbl_rol_desc.setText(_ROL_DESCRIPCION.get(rol, ""))
 
     def _guardar(self):
-        usuario = self.entrada_usuario.text().strip()
-        nombre = self.entrada_nombre.text().strip()
-        contrasena = self.entrada_contrasena.text()
-        if not all([usuario, nombre, contrasena]):
-            self._msg.mostrar("Todos los campos son obligatorios.", "error")
-            return
-        if len(contrasena) < 4:
-            self._msg.mostrar("La contraseña debe tener al menos 4 caracteres.", "error")
+        campos = (self.campo_usuario, self.campo_nombre, self.campo_contrasena)
+        if not all(c.validar() for c in campos):
             return
         try:
-            crear_usuario(usuario=usuario, nombre_completo=nombre,
-                          contrasena=contrasena, rol=self.combo_rol.currentText())
+            crear_usuario(usuario=self.campo_usuario.get(), nombre_completo=self.campo_nombre.get(),
+                          contrasena=self.campo_contrasena.get(), rol=self.campo_rol.get())
         except ErrorAutenticacion as error:
             self._msg.mostrar(f"No se pudo crear el usuario: {error}", "error", 0)
             return

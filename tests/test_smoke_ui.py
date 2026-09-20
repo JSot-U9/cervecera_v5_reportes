@@ -47,6 +47,7 @@ from app.sesion import sesion_actual
 from app.ui.widgets import (
     TablaDatos, EstadoVacio, formatear_estado, tag_para_estado,
     texto_pestana_legible, conectar_pestanas_a_header,
+    CampoFormulario, conectar_boton_a_validez,
 )
 
 
@@ -347,3 +348,159 @@ def test_volver_del_detalle_actualiza_el_breadcrumb_del_header(
 
     vista._volver_de_detalle()
     assert ventana.llamadas[-1] == "Stock Actual"
+
+
+# ══════════════════════════════════════════════════════════════════
+#  PARTE 4 — validación inline en formularios
+# ══════════════════════════════════════════════════════════════════
+
+def test_campo_formulario_valida_obligatorio_en_vivo(qapp):
+    campo = CampoFormulario("Nombre", obligatorio=True)
+    assert campo.es_valido() is False  # vacío al construirse
+
+    campo.widget.setText("")
+    campo.widget.editingFinished.emit()
+    assert campo.es_valido() is False
+    assert "obligatorio" in campo._lbl_error.text().lower()
+
+    campo.widget.setText("Malta Pilsen")
+    campo.widget.editingFinished.emit()
+    assert campo.es_valido() is True
+    assert campo._lbl_error.text() == ""
+
+
+def test_campo_formulario_numero_rechaza_negativos_en_vivo(qapp):
+    campo = CampoFormulario("Stock mínimo", tipo="numero", permitir_negativo=False)
+    campo.widget.setText("-5")
+    campo.widget.editingFinished.emit()
+    assert campo.es_valido() is False
+    assert "negativo" in campo._lbl_error.text().lower()
+
+    campo.widget.setText("5")
+    campo.widget.editingFinished.emit()
+    assert campo.es_valido() is True
+
+
+def test_campo_formulario_valida_tras_dejar_de_escribir(qapp):
+    """El debounce (QTimer) también debe disparar la validación, no
+    solo editingFinished — simula "dejar de escribir" sin salir del
+    campo, disparando el timeout directamente en vez de esperar los
+    600ms reales."""
+    campo = CampoFormulario("Stock mínimo", tipo="numero", permitir_negativo=False)
+    campo.widget.setText("-3")  # dispara textChanged -> arranca el temporizador
+    assert campo._temporizador.isActive()
+    campo._temporizador.timeout.emit()
+    assert campo.es_valido() is False
+    assert "negativo" in campo._lbl_error.text().lower()
+
+
+def test_conectar_boton_a_validez_bloquea_hasta_corregir(qapp):
+    from PySide6.QtWidgets import QPushButton
+
+    campo_nombre = CampoFormulario("Nombre", obligatorio=True)
+    campo_stock = CampoFormulario("Stock mínimo", tipo="numero", permitir_negativo=False)
+    boton = QPushButton("Guardar")
+    conectar_boton_a_validez(boton, [campo_nombre, campo_stock])
+
+    assert boton.isEnabled() is False  # nombre vacío al arrancar
+
+    campo_nombre.widget.setText("Malta")
+    campo_nombre.widget.editingFinished.emit()
+    assert boton.isEnabled() is True  # ambos campos válidos (stock vacío = 0.0, válido)
+
+    campo_stock.widget.setText("-10")
+    campo_stock.widget.editingFinished.emit()
+    assert boton.isEnabled() is False  # se bloquea de nuevo
+
+    campo_stock.widget.setText("10")
+    campo_stock.widget.editingFinished.emit()
+    assert boton.isEnabled() is True  # corregido -> se reactiva
+
+
+def test_producto_con_stock_minimo_negativo_muestra_error_inline_y_bloquea_guardado(
+    qapp, base_de_datos_limpia, sin_sesion,
+):
+    """El caso pedido explícitamente: llenar el formulario de un
+    producto con un stock mínimo negativo debe mostrar el error
+    inline debajo del campo y dejar "Guardar" deshabilitado hasta que
+    se corrija — sin tener que hacer clic en Guardar para enterarse."""
+    from app.ui.vista_inventario import VentanaProducto
+
+    _iniciar_como("ADMIN")
+    ventana = VentanaProducto(None, al_guardar=lambda: None)
+
+    # Con el nombre puesto y el stock mínimo en su valor por defecto
+    # ("0", válido), ya se podría guardar.
+    ventana.campo_nombre.set("Levadura Ale")
+    ventana.campo_nombre.widget.editingFinished.emit()
+    assert ventana.btn_guardar.isEnabled() is True
+
+    # Stock mínimo negativo -> error inline + botón bloqueado.
+    ventana.campo_stock_minimo.widget.setText("-5")
+    ventana.campo_stock_minimo.widget.editingFinished.emit()
+    assert ventana.campo_stock_minimo.es_valido() is False
+    assert "negativo" in ventana.campo_stock_minimo._lbl_error.text().lower()
+    assert ventana.btn_guardar.isEnabled() is False
+
+    # Se corrige -> el error inline desaparece y el botón se reactiva,
+    # sin haber tocado "Guardar" en ningún momento.
+    ventana.campo_stock_minimo.widget.setText("20")
+    ventana.campo_stock_minimo.widget.editingFinished.emit()
+    assert ventana.campo_stock_minimo.es_valido() is True
+    assert ventana.campo_stock_minimo._lbl_error.text() == ""
+    assert ventana.btn_guardar.isEnabled() is True
+
+
+def test_ajuste_stock_cantidad_negativa_bloquea_guardado(
+    qapp, base_de_datos_limpia, sin_sesion,
+):
+    from datetime import date
+    import app.modelos as m
+    from app.ui.vista_inventario import VentanaAjusteStock
+
+    _iniciar_como("ADMIN")
+    db = nueva_sesion()
+    p = m.Producto(codigo="INS-1", nombre="Malta", tipo="Insumo",
+                    unidad_medida="kg", stock_minimo=5, activo=True)
+    db.add(p)
+    db.flush()
+    lote = m.LoteInventario(numero_lote="LT-0001", producto_id=p.id,
+                             fecha_ingreso=date.today(), cantidad_inicial=10,
+                             cantidad_disponible=10, estado="DISPONIBLE")
+    db.add(lote)
+    db.commit()
+    lote_id = lote.id
+    db.close()
+
+    ventana = VentanaAjusteStock(None, lote_id, al_guardar=lambda: None)
+    ventana.campo_motivo.set("Conteo físico")
+    ventana.campo_motivo.widget.editingFinished.emit()
+    assert ventana.btn_guardar.isEnabled() is True  # cantidad ya viene con "10" (válida)
+
+    ventana.campo_cantidad.widget.setText("-1")
+    ventana.campo_cantidad.widget.editingFinished.emit()
+    assert ventana.campo_cantidad.es_valido() is False
+    assert ventana.btn_guardar.isEnabled() is False
+
+
+def test_usuario_nuevo_contrasena_corta_bloquea_guardado(
+    qapp, base_de_datos_limpia, sin_sesion,
+):
+    """Regla que YA existía (antes solo se avisaba al guardar): la
+    contraseña debe tener al menos 4 caracteres."""
+    from app.ui.vista_admin import VentanaNuevoUsuario
+
+    _iniciar_como("ADMIN")
+    ventana = VentanaNuevoUsuario(None, al_guardar=lambda: None)
+    ventana.campo_usuario.set("juanp")
+    ventana.campo_nombre.set("Juan Pérez")
+    ventana.campo_contrasena.set("123")
+    ventana.campo_contrasena.widget.editingFinished.emit()
+
+    assert ventana.campo_contrasena.es_valido() is False
+    assert "4 caracteres" in ventana.campo_contrasena._lbl_error.text()
+    assert ventana.btn_guardar.isEnabled() is False
+
+    ventana.campo_contrasena.set("1234")
+    ventana.campo_contrasena.widget.editingFinished.emit()
+    assert ventana.btn_guardar.isEnabled() is True
