@@ -53,6 +53,7 @@ from app.logica_autenticacion import (
 from app.logica_inventario import (
     crear_lote, stock_total, consumir_fifo, StockInsuficiente,
     ajustar_stock, productos_bajo_minimo, lotes_proximos_a_vencer,
+    desactivar_producto, reactivar_producto, lotes_con_stock_de_producto,
 )
 from app.logica_compras import registrar_compra
 from app.logica_ventas import registrar_venta
@@ -426,6 +427,43 @@ class TestInventario:
         resultado = lotes_proximos_a_vencer(db, dias=30)
         numeros = [l.numero_lote for l in resultado]
         assert "L-SIN-VEN" not in numeros
+
+    def test_desactivar_producto(self, db, insumo):
+        desactivar_producto(db, insumo.id)
+        db.refresh(insumo)
+        assert insumo.activo is False
+
+    def test_reactivar_producto(self, db, insumo):
+        desactivar_producto(db, insumo.id)
+        reactivar_producto(db, insumo.id)
+        db.refresh(insumo)
+        assert insumo.activo is True
+
+    def test_desactivar_producto_ya_inactivo_lanza_error(self, db, insumo):
+        desactivar_producto(db, insumo.id)
+        with pytest.raises(ValueError):
+            desactivar_producto(db, insumo.id)
+
+    def test_desactivar_producto_inexistente_lanza_error(self, db):
+        with pytest.raises(ValueError):
+            desactivar_producto(db, 99999)
+
+    def test_lotes_con_stock_de_producto_cuenta_solo_disponibles(self, db, insumo):
+        crear_lote(db, producto_id=insumo.id, numero_lote="L-A",
+                   cantidad=20.0, costo_unitario=5.0)
+        crear_lote(db, producto_id=insumo.id, numero_lote="L-B",
+                   cantidad=15.0, costo_unitario=5.0)
+        lote_agotado = LoteInventario(
+            numero_lote="L-AGOTADO", producto_id=insumo.id,
+            cantidad_inicial=10.0, cantidad_disponible=0.0,
+            costo_unitario=5.0, estado="AGOTADO",
+        )
+        db.add(lote_agotado)
+        db.commit()
+        assert lotes_con_stock_de_producto(db, insumo.id) == 2
+
+    def test_lotes_con_stock_de_producto_sin_lotes_es_cero(self, db, producto_terminado):
+        assert lotes_con_stock_de_producto(db, producto_terminado.id) == 0
 
 
 # ══════════════════════════════════════════════════════════════════

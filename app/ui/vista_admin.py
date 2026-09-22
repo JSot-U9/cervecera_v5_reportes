@@ -10,7 +10,7 @@ from PySide6.QtWidgets import (
 )
 
 from app.basedatos import nueva_sesion
-from app.modelos import LogAcceso, Usuario
+from app.modelos import LogAcceso, Usuario, OrdenCompra
 from app.logica_autenticacion import (
     listar_usuarios, crear_usuario, desactivar_usuario, reactivar_usuario, ErrorAutenticacion,
 )
@@ -272,10 +272,24 @@ class VistaAdmin(QWidget):
         item_nombre = self.tabla_usuarios.item(fila, 1)
         nombre_usuario = item_nombre.text() if item_nombre else "este usuario"
 
+        # Conteo real (no una advertencia genérica): cuántas órdenes de
+        # compra registró este usuario, para que quien desactiva vea el
+        # impacto real antes de confirmar. El historial se conserva
+        # igual — desactivar solo bloquea el inicio de sesión.
+        with nueva_sesion() as db:
+            n_ordenes = db.query(OrdenCompra).filter_by(creado_por=usuario_id).count()
+        detalle_ordenes = (
+            f"Registró {n_ordenes} orden{'es' if n_ordenes != 1 else ''} de compra; "
+            "quedarán intactas en el historial."
+            if n_ordenes > 0 else
+            "No tiene órdenes de compra registradas."
+        )
+
         ok = confirmar(
             self, "Desactivar usuario",
             f"¿Deseas desactivar la cuenta de «{nombre_usuario}»?\n\n"
-            f"El usuario no podrá iniciar sesión hasta que se reactive.",
+            f"El usuario no podrá iniciar sesión hasta que se reactive. "
+            f"{detalle_ordenes}",
             texto_confirmar="Desactivar cuenta", texto_cancelar="Cancelar", peligro=True,
         )
         if not ok:

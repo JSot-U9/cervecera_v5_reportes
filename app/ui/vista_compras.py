@@ -24,7 +24,7 @@ from app.logica_compras import (
 from app.ui.widgets import (
     EncabezadoModulo, BarraBusqueda, TablaDatos, SeccionFormulario, MensajeEstado,
     centrar_ventana, confirmar, EstadoVacio, conectar_pestanas_a_header,
-    CampoFormulario, conectar_boton_a_validez,
+    CampoFormulario, conectar_boton_a_validez, formatear_estado, tag_para_estado,
 )
 from app.ui.estilos import COLOR_TEXTO_SECUNDARIO, COLOR_PRIMARIO, fuente, poner_clase
 
@@ -516,6 +516,11 @@ class VentanaNuevaOrden(QDialog):
             con_id=False, permitir_orden=False,
             anchos={"Producto": 180, "Cantidad": 80, "Precio Unit. (S/)": 120,
                     "Vence": 110, "Subtotal (S/)": 110},
+            estado_vacio=EstadoVacio(
+                "🛒", "Orden vacía",
+                "Selecciona un producto, ingresa la cantidad y el precio, "
+                "y pulsa «Agregar» para añadirlo a la orden.",
+            ),
         )
         stl.addWidget(self.tabla_items, stretch=1)
 

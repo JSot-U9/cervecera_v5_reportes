@@ -498,6 +498,14 @@ _ESTADO_MAP = {
     "ALTA":        ("🔴", "Alta",       "alerta"),
     "MEDIA":       ("🟠", "Media",      "advertencia"),
     "BAJA":        ("🟢", "Baja",       "normal"),
+    # Tipos de movimiento de inventario. Son transacciones, no estados de
+    # alerta, por eso todos usan el tag "normal" — el ícono es lo que
+    # da contexto visual sin añadir ruido de color.
+    "ENTRADA":     ("⬇", "Entrada",    "normal"),
+    "SALIDA":      ("⬆", "Salida",     "normal"),
+    "CONSUMO":     ("⚙", "Consumo",    "normal"),
+    "VENTA":       ("💰", "Venta",      "normal"),
+    "AJUSTE":      ("✏", "Ajuste",     "normal"),
 }
 
 

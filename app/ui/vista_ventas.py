@@ -368,6 +368,11 @@ class VentanaNuevaVenta(QDialog):
             ["Producto", "Cantidad", "Precio Unit. (S/)", "Subtotal (S/)"], con_id=False,
             permitir_orden=False,
             anchos={"Producto": 200, "Cantidad": 80, "Precio Unit. (S/)": 130, "Subtotal (S/)": 120},
+            estado_vacio=EstadoVacio(
+                "🛍", "Carrito vacío",
+                "Selecciona un producto, ingresa la cantidad "
+                "y pulsa «Agregar» para añadirlo a la venta.",
+            ),
         )
         scarl.addWidget(self.tabla_items, stretch=1)
 

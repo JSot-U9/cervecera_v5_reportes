@@ -13,12 +13,15 @@ from app.basedatos import nueva_sesion
 from app.modelos import Producto, LoteInventario, MovimientoInventario
 from app.sesion import sesion_actual
 from app.seguridad import puede, modulos_visibles
-from app.logica_inventario import stock_total, ajustar_stock, siguiente_codigo
+from app.logica_inventario import (
+    stock_total, ajustar_stock, siguiente_codigo,
+    desactivar_producto, lotes_con_stock_de_producto,
+)
 from app.ui.widgets import (
     EncabezadoModulo, BarraBusqueda, TablaDatos, SeccionFormulario, MensajeEstado,
     centrar_ventana, formatear_estado, tag_para_estado, BotonAyuda,
     EstadoVacio, conectar_pestanas_a_header, texto_pestana_legible,
-    CampoFormulario, conectar_boton_a_validez,
+    CampoFormulario, conectar_boton_a_validez, confirmar,
 )
 from app.ui.vista_detalle_producto import VistaDetalleProducto
 from app.ui.estilos import COLOR_TEXTO_SECUNDARIO, COLOR_PRIMARIO, fuente, poner_clase, fondo
@@ -177,6 +180,7 @@ class VistaInventario(QWidget):
                                placeholder="🔎  Buscar en catálogo...")
         if puede_editar:
             barra.agregar_boton("＋  Nuevo producto", self._abrir_nuevo_producto)
+            barra.agregar_boton("🗑  Desactivar", self._desactivar_producto, estilo="peligro")
         pl.addWidget(barra)
 
         self.tabla_catalogo = TablaDatos(
@@ -261,7 +265,8 @@ class VistaInventario(QWidget):
             for m in movimientos:
                 filas_movimientos.append([
                     m.id, m.lote.producto.nombre if m.lote else "—",
-                    m.lote.numero_lote if m.lote else "—", m.tipo,
+                    m.lote.numero_lote if m.lote else "—",
+                    formatear_estado(m.tipo),   # ícono + texto legible, nunca solo el string interno
                     f"{m.cantidad:.2f}", m.referencia or "—", str(m.fecha)[:16],
                 ])
 
@@ -287,6 +292,44 @@ class VistaInventario(QWidget):
 
     def _abrir_nuevo_producto(self):
         VentanaProducto(self.window(), al_guardar=self.refrescar).exec()
+
+    def _desactivar_producto(self):
+        """Desactiva el producto seleccionado en Catálogo (Parte 5):
+        soft-delete con confirmación destructiva que muestra el
+        impacto real (cuántos lotes con stock quedarían huérfanos del
+        catálogo activo), no solo una advertencia genérica."""
+        fila = self.tabla_catalogo.currentRow()
+        producto_id = self.tabla_catalogo.id_seleccionado()
+        if not producto_id:
+            QMessageBox.warning(self, "Aviso", "Selecciona un producto de la lista primero.")
+            return
+        item_nombre = self.tabla_catalogo.item(fila, 1)
+        nombre_producto = item_nombre.text() if item_nombre else "este producto"
+
+        with nueva_sesion() as db:
+            n_lotes = lotes_con_stock_de_producto(db, producto_id)
+        detalle_stock = (
+            f"Tiene {n_lotes} lote{'s' if n_lotes != 1 else ''} con stock disponible; "
+            "seguirán existiendo en el historial, pero el producto dejará de "
+            "aparecer en el catálogo activo y en los selectores de nuevas "
+            "órdenes o producción."
+            if n_lotes > 0 else
+            "No tiene lotes con stock disponible en este momento."
+        )
+        ok = confirmar(
+            self, "Desactivar producto",
+            f"¿Deseas desactivar «{nombre_producto}»?\n\n{detalle_stock}",
+            texto_confirmar="Desactivar producto", texto_cancelar="Cancelar", peligro=True,
+        )
+        if not ok:
+            return
+        with nueva_sesion() as db:
+            try:
+                desactivar_producto(db, producto_id)
+            except ValueError as error:
+                QMessageBox.critical(self, "No se pudo desactivar", str(error))
+                return
+        self.refrescar()
 
     def _abrir_dialogo_reporte(self, clave="stock"):
         from app.ui.dialogo_reporte import DialogoReporte

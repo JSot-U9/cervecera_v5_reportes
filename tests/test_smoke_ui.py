@@ -293,6 +293,15 @@ def test_doble_clic_abre_el_detalle_con_los_kpis_correctos(
     assert detalle.tabla_movimientos_detalle.rowCount() == 1
     assert detalle.tabla_ventas_detalle.rowCount() == 1
 
+    # La columna "Tipo" de Movimientos debe pasar por formatear_estado(),
+    # igual que ya se hacía en Inventario principal — no el valor crudo
+    # de BD ("ENTRADA") sin ícono ni capitalización.
+    indice_col_tipo = next(
+        i for i in range(detalle.tabla_movimientos_detalle.columnCount())
+        if detalle.tabla_movimientos_detalle.horizontalHeaderItem(i).text() == "Tipo"
+    )
+    assert detalle.tabla_movimientos_detalle.item(0, indice_col_tipo).text() == "⬇ Entrada"
+
     # Navega las 5 pestañas sin que nada reviente.
     for i in range(detalle.notebook.count()):
         detalle.notebook.setCurrentIndex(i)
@@ -344,7 +353,23 @@ def test_volver_del_detalle_actualiza_el_breadcrumb_del_header(
     layout.addWidget(vista)
 
     vista._abrir_detalle_producto(producto_id)
-    assert ventana.llamadas_migas[-1] == ("Anka Chida", ["Productos", "Anka Chida"])
+    assert ventana.llamadas_migas[-1] == (
+        "Anka Chida · Información", ["Productos", "Anka Chida", "Información"],
+    )
+
+    # Cambiar de pestaña DENTRO del detalle también debe reflejar el
+    # nombre del producto en el breadcrumb, no solo el nombre de la
+    # pestaña (si no, se perdería el contexto de qué producto se está
+    # viendo: "Inventario · Lotes" en vez de "Inventario · Productos ·
+    # Anka Chida · Lotes").
+    indice_lotes = next(
+        i for i in range(vista._detalle_producto.notebook.count())
+        if "Lotes" in vista._detalle_producto.notebook.tabText(i)
+    )
+    vista._detalle_producto.notebook.setCurrentIndex(indice_lotes)
+    assert ventana.llamadas_migas[-1] == (
+        "Anka Chida · Lotes", ["Productos", "Anka Chida", "Lotes"],
+    )
 
     vista._volver_de_detalle()
     assert ventana.llamadas[-1] == "Stock Actual"
@@ -504,3 +529,204 @@ def test_usuario_nuevo_contrasena_corta_bloquea_guardado(
     ventana.campo_contrasena.set("1234")
     ventana.campo_contrasena.widget.editingFinished.emit()
     assert ventana.btn_guardar.isEnabled() is True
+
+
+# ══════════════════════════════════════════════════════════════════
+#  PARTE 1 (ampliación) — badges en tabla_items y tipos de movimiento
+# ══════════════════════════════════════════════════════════════════
+
+def test_tipos_de_movimiento_en_estado_map():
+    """Todos los tipos que genera el sistema deben tener ícono en
+    _ESTADO_MAP para que tabla_movimientos nunca muestre texto crudo."""
+    for tipo in ("ENTRADA", "SALIDA", "CONSUMO", "VENTA", "AJUSTE"):
+        resultado = formatear_estado(tipo)
+        # Debe contener al menos un carácter no-ASCII (el ícono)
+        assert resultado != tipo, f"formatear_estado({tipo!r}) devolvió el mismo string sin ícono"
+        assert tag_para_estado(tipo) == "normal"
+
+
+def test_tabla_items_compras_muestra_estado_vacio(qapp):
+    """La tabla de ítems de una nueva orden de compra debe mostrar
+    EstadoVacio mientras no se haya agregado ningún producto."""
+    from app.ui.vista_compras import VentanaNuevaOrden
+
+    # VentanaNuevaOrden necesita sesión activa para consultar proveedores
+    _iniciar_como("ADMIN")
+
+    # Construir sin mostrar en pantalla
+    dialogo = VentanaNuevaOrden(None, al_guardar=lambda: None)
+    dialogo.resize(800, 600)
+
+    # Al abrirse, la tabla de ítems está vacía -> EstadoVacio visible
+    assert dialogo.tabla_items._estado_vacio is not None
+    dialogo.tabla_items.cargar_filas([])
+    assert dialogo.tabla_items._estado_vacio.isVisibleTo(dialogo.tabla_items) is True
+
+    # Simular un ítem agregado -> EstadoVacio se oculta
+    dialogo.tabla_items.cargar_filas([["Malta Pilsen", "50", "S/ 2.50", "2027-01-01", "S/ 125.00"]])
+    assert dialogo.tabla_items._estado_vacio.isVisibleTo(dialogo.tabla_items) is False
+
+
+def test_tabla_items_ventas_muestra_estado_vacio(qapp):
+    """La tabla del carrito de una nueva venta debe mostrar EstadoVacio
+    cuando no se ha seleccionado ningún producto todavía."""
+    from app.ui.vista_ventas import VentanaNuevaVenta
+
+    _iniciar_como("ADMIN")
+
+    dialogo = VentanaNuevaVenta(None, al_guardar=lambda: None)
+    dialogo.resize(800, 600)
+
+    assert dialogo.tabla_items._estado_vacio is not None
+    dialogo.tabla_items.cargar_filas([])
+    assert dialogo.tabla_items._estado_vacio.isVisibleTo(dialogo.tabla_items) is True
+
+    dialogo.tabla_items.cargar_filas([["Anka Chida", "6", "S/ 15.00", "S/ 90.00"]])
+    assert dialogo.tabla_items._estado_vacio.isVisibleTo(dialogo.tabla_items) is False
+
+
+def test_tabla_items_filtra_y_muestra_estado_vacio(qapp):
+    """Si el usuario aplica un filtro que no coincide con ningún ítem
+    ya agregado, debe aparecer EstadoVacio (no una tabla en blanco)."""
+    from app.ui.vista_compras import VentanaNuevaOrden
+
+    _iniciar_como("COMPRAS")
+
+    dialogo = VentanaNuevaOrden(None, al_guardar=lambda: None)
+    dialogo.resize(800, 600)
+
+    dialogo.tabla_items.cargar_filas([["Malta Pilsen", "50", "S/ 2.50", "2027-01-01", "S/ 125.00"]])
+    assert dialogo.tabla_items._estado_vacio.isVisibleTo(dialogo.tabla_items) is False
+
+    dialogo.tabla_items.filtrar("xxxxxxxxxxx")
+    assert dialogo.tabla_items._estado_vacio.isVisibleTo(dialogo.tabla_items) is True
+
+    dialogo.tabla_items.filtrar("")
+    assert dialogo.tabla_items._estado_vacio.isVisibleTo(dialogo.tabla_items) is False
+
+
+def test_tabla_movimientos_usa_formatear_estado(qapp, base_de_datos_limpia, sin_sesion):
+    """Después del parche, la columna Tipo de la tabla de movimientos
+    debe contener el texto formateado (ícono + etiqueta), no el string
+    interno crudo como 'ENTRADA' o 'CONSUMO'."""
+    from datetime import date
+    import app.modelos as m
+    from app.ui.vista_inventario import VistaInventario
+
+    _iniciar_como("ADMIN")
+
+    # Crear un producto con un lote y varios tipos de movimiento
+    with _bd.SesionLocal() as db:
+        p = m.Producto(codigo="INS-MOV", nombre="Lúpulo Cascade", tipo="Insumo",
+                        unidad_medida="kg", stock_minimo=5, activo=True)
+        db.add(p)
+        db.flush()
+        lote = m.LoteInventario(numero_lote="LT-MOV-1", producto_id=p.id,
+                                  fecha_ingreso=date.today(), cantidad_inicial=100,
+                                  cantidad_disponible=80, estado="DISPONIBLE")
+        db.add(lote)
+        db.flush()
+        for tipo in ("ENTRADA", "SALIDA", "AJUSTE"):
+            db.add(m.MovimientoInventario(
+                lote_id=lote.id, tipo=tipo, cantidad=10, referencia="TEST"))
+        db.commit()
+
+    vista = VistaInventario()
+    vista.resize(900, 600)
+
+    # La columna índice 3 es "Tipo" (después de id, producto, lote)
+    # Los textos de esa columna deben contener íconos, no strings crudos
+    tipos_crudos = {"ENTRADA", "SALIDA", "CONSUMO", "VENTA", "AJUSTE"}
+    for fila_data in vista.tabla_movimientos._filas_actuales:
+        tipo_celda = str(fila_data[3])  # índice 3 = Tipo en filas_movimientos
+        assert tipo_celda not in tipos_crudos, (
+            f"La columna Tipo contiene el string interno crudo '{tipo_celda}' "
+            "en vez del texto formateado con ícono."
+        )
+
+
+# ══════════════════════════════════════════════════════════════════
+#  PARTE 5 — confirmaciones destructivas (producto y usuario)
+# ══════════════════════════════════════════════════════════════════
+
+def test_desactivar_producto_pide_confirmacion_y_usa_conteo_real(
+    qapp, base_de_datos_limpia, sin_sesion, monkeypatch,
+):
+    """El botón "Desactivar" de Catálogo debe mostrar un diálogo de
+    confirmación con el conteo real de lotes con stock antes de
+    desactivar, y no tocar nada si el usuario cancela."""
+    from datetime import date
+    import app.modelos as m
+    import app.ui.vista_inventario as vi
+
+    _iniciar_como("ADMIN")
+    with _bd.SesionLocal() as db:
+        p = m.Producto(codigo="INS-DES", nombre="Levadura Test", tipo="Insumo",
+                        unidad_medida="g", stock_minimo=5, activo=True)
+        db.add(p)
+        db.flush()
+        db.add(m.LoteInventario(numero_lote="LT-DES-1", producto_id=p.id,
+                                 fecha_ingreso=date.today(),
+                                 cantidad_inicial=100, cantidad_disponible=100,
+                                 estado="DISPONIBLE"))
+        db.commit()
+        producto_id = p.id
+
+    vista = vi.VistaInventario()
+    vista.resize(900, 600)
+    vista.refrescar()
+    vista.tabla_catalogo.selectRow(0)  # único producto en la BD limpia
+
+    mensajes_confirmacion = []
+
+    def _confirmar_falso(parent, titulo, mensaje, **kw):
+        mensajes_confirmacion.append(mensaje)
+        return False  # simula que el usuario cancela
+
+    monkeypatch.setattr(vi, "confirmar", _confirmar_falso)
+    vista._desactivar_producto()
+
+    assert mensajes_confirmacion  # se mostró el diálogo
+    assert "1 lote" in mensajes_confirmacion[-1]
+    with _bd.SesionLocal() as db:
+        assert db.get(m.Producto, producto_id).activo is True  # cancelar no cambia nada
+
+    monkeypatch.setattr(vi, "confirmar", lambda *a, **kw: True)
+    vista._desactivar_producto()
+    with _bd.SesionLocal() as db:
+        assert db.get(m.Producto, producto_id).activo is False
+
+
+def test_desactivar_usuario_muestra_conteo_de_ordenes(
+    qapp, base_de_datos_limpia, sin_sesion, monkeypatch,
+):
+    import app.modelos as m
+    import app.ui.vista_admin as va
+    from app.logica_autenticacion import crear_usuario
+
+    _iniciar_como("ADMIN")
+    u = crear_usuario("comprador1", "Comprador Uno", "clave123", "COMPRAS")
+    with _bd.SesionLocal() as db:
+        prov = m.Proveedor(razon_social="Proveedor Test", ruc="20111111111", activo=True)
+        db.add(prov)
+        db.flush()
+        db.add(m.OrdenCompra(numero="OC-DES-1", proveedor_id=prov.id,
+                              total=100.0, creado_por=u.id))
+        db.commit()
+
+    vista = va.VistaAdmin()
+    vista.resize(900, 600)
+    vista.refrescar()
+    fila = next(
+        r for r in range(vista.tabla_usuarios.rowCount())
+        if vista.tabla_usuarios.item(r, 0) and vista.tabla_usuarios.item(r, 0).text() == "comprador1"
+    )
+    vista.tabla_usuarios.selectRow(fila)
+
+    mensajes = []
+    monkeypatch.setattr(va, "confirmar", lambda parent, titulo, mensaje, **kw: mensajes.append(mensaje) or True)
+    vista._desactivar()
+
+    assert "1 orden" in mensajes[-1]
+    with _bd.SesionLocal() as db:
+        assert db.get(m.Usuario, u.id).activo is False

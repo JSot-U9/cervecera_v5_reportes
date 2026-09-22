@@ -38,6 +38,8 @@ from app.ui.estilos import (
     fuente, fondo, poner_clase,
 )
 from app.ui.widgets import EncabezadoModulo, TarjetaKPI, MensajeEstado
+from app.sesion import sesion_actual
+from app.seguridad import puede
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -292,14 +294,17 @@ class VistaPrediccion(QWidget):
         self._lbl_modelo_metricas.setWordWrap(True)
         ml.addWidget(self._lbl_modelo_metricas)
 
-        self._btn_entrenar = QPushButton("🔄  Entrenar / actualizar modelo")
-        poner_clase(self._btn_entrenar, "secundario")
-        self._btn_entrenar.setToolTip(
-            "Reentrenar el modelo con todos los datos actuales del ERP.\n"
-            "Esto puede tardar unos segundos."
-        )
-        self._btn_entrenar.clicked.connect(self._ejecutar_entrenamiento)
-        ml.addWidget(self._btn_entrenar)
+        if puede(sesion_actual.rol, "centro_inteligencia", "entrenar"):
+            self._btn_entrenar = QPushButton("🔄  Entrenar / actualizar modelo")
+            poner_clase(self._btn_entrenar, "secundario")
+            self._btn_entrenar.setToolTip(
+                "Reentrenar el modelo con todos los datos actuales del ERP.\n"
+                "Esto puede tardar unos segundos."
+            )
+            self._btn_entrenar.clicked.connect(self._ejecutar_entrenamiento)
+            ml.addWidget(self._btn_entrenar)
+        else:
+            self._btn_entrenar = None
 
         self._progreso_entreno = QProgressBar()
         self._progreso_entreno.setRange(0, 0)
@@ -539,6 +544,8 @@ class VistaPrediccion(QWidget):
     # ── Lógica: entrenamiento ─────────────────────────────────────
 
     def _ejecutar_entrenamiento(self):
+        if self._btn_entrenar is None:
+            return
         self._btn_entrenar.setEnabled(False)
         self._progreso_entreno.setVisible(True)
         self._lbl_log_entreno.setText("Iniciando entrenamiento...")
@@ -556,7 +563,8 @@ class VistaPrediccion(QWidget):
         self._lbl_log_entreno.setText(msg)
 
     def _on_entrenamiento_terminado(self, resultado: dict):
-        self._btn_entrenar.setEnabled(True)
+        if self._btn_entrenar is not None:
+            self._btn_entrenar.setEnabled(True)
         self._progreso_entreno.setVisible(False)
 
         if resultado.get("exito"):

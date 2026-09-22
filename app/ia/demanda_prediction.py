@@ -59,10 +59,14 @@ def predecir_demanda(producto_id: int, horizonte: int) -> dict:
     if usar_ml:
         try:
             modelo_xgb, _ = cargar_modelos()
-            df_futuro = construir_features_futuro(df_hist, horizonte)
-            predicciones = modelo_xgb.predict(df_futuro).tolist()
+            # Predictor recursivo: cada predicción alimenta los lags del día siguiente
+            df_futuro = construir_features_futuro(
+                df_hist, horizonte,
+                predictor=lambda fila: modelo_xgb.predict(fila[COLUMNAS_FEATURES])[0],
+            )
+            predicciones = df_futuro["pred_cantidad"].tolist()
             usando_ml = True
-        except Exception as e:
+        except Exception:
             # Fallback a baseline si el modelo falla
             usar_ml = False
             usando_ml = False

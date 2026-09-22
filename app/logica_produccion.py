@@ -150,3 +150,24 @@ def listar_recetas_activas(db=None):
         return db.query(Receta).filter_by(activa=True).all()
     with nueva_sesion() as db:
         return db.query(Receta).filter_by(activa=True).all()
+
+
+def recetas_activas_de_producto(db, producto_terminado_id: int) -> list[dict]:
+    """
+    Devuelve las recetas activas del producto terminado indicado como
+    lista de dicts con las claves que usa PestanaInteligenciaProducto:
+      id, rendimiento, unidad (= unidad_rendimiento del modelo ORM).
+    """
+    recetas = (
+        db.query(Receta)
+        .filter_by(activa=True, producto_terminado_id=producto_terminado_id)
+        .all()
+    )
+    return [
+        {
+            "id":          r.id,
+            "rendimiento": r.rendimiento,
+            "unidad":      r.unidad_rendimiento or "",
+        }
+        for r in recetas
+    ]

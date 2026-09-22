@@ -36,7 +36,7 @@ from app.logica_inventario import stock_total, actualizar_producto
 from app.ui.widgets import (
     TarjetaKPI, Migaja, TablaDatos, SeccionFormulario, MensajeEstado,
     formatear_estado, tag_para_estado, EstadoVacio, ejecutar_con_carga,
-    CampoFormulario, conectar_boton_a_validez,
+    CampoFormulario, conectar_boton_a_validez, texto_pestana_legible,
 )
 from app.ui.estilos import COLOR_TEXTO_SECUNDARIO, COLOR_PRIMARIO, fuente, poner_clase
 
@@ -50,6 +50,7 @@ class VistaDetalleProducto(QWidget):
         self._volver_cb = volver
         self._al_guardar_cb = al_guardar
         self.producto_id: int | None = None
+        self._nombre_actual: str | None = None
         self.tutorial_targets = {}
 
         layout = QVBoxLayout(self)
@@ -98,6 +99,27 @@ class VistaDetalleProducto(QWidget):
         self._pestana_ventas()
         self._indice_tab_inteligencia = None  # se agrega recién en cargar(), según el rol
 
+        # Igual que el resto de vistas con pestañas internas, pero acá el
+        # header necesita el nombre del producto ADEMÁS de la pestaña
+        # activa (si no, al cambiar de pestaña dentro del detalle el
+        # breadcrumb perdería el contexto de qué producto se está viendo:
+        # "Inventario · Lotes" en vez de "Inventario · Productos ·
+        # Anka Chida · Lotes"). Por eso no se usa conectar_pestanas_a_header
+        # genérico y en cambio hay un manejador propio.
+        self.notebook.currentChanged.connect(self._al_cambiar_pestana)
+
+    def _al_cambiar_pestana(self, indice: int):
+        if self._nombre_actual is None:
+            return
+        ventana = self.window()
+        if not hasattr(ventana, "actualizar_pestana_interna"):
+            return
+        texto_pestana = texto_pestana_legible(self.notebook.tabText(indice))
+        ventana.actualizar_pestana_interna(
+            f"{self._nombre_actual} · {texto_pestana}",
+            migas_extra=["Productos", self._nombre_actual, texto_pestana],
+        )
+
     # ══════════════════════════════════════════════════════════
     #  Construcción de pestañas (una sola vez)
     # ══════════════════════════════════════════════════════════
@@ -105,7 +127,12 @@ class VistaDetalleProducto(QWidget):
         pestana = QWidget()
         pl = QVBoxLayout(pestana)
         pl.setContentsMargins(10, 10, 10, 10)
-        self.notebook.addTab(pestana, "ℹ️  Información")
+        # Nota: se usa 📄 y no ℹ️ a propósito — unicodedata clasifica el
+        # code point de ℹ️ (U+2139) como letra ("Ll") en este entorno, lo
+        # que hace que texto_pestana_legible() no lo reconozca como
+        # ícono decorativo y lo deje pegado al texto en el breadcrumb
+        # del header ("Anka Chida · ℹ️  Información").
+        self.notebook.addTab(pestana, "📄  Información")
 
         self._msg_info = MensajeEstado()
         pl.addWidget(self._msg_info)
@@ -313,7 +340,7 @@ class VistaDetalleProducto(QWidget):
                         .order_by(MovimientoInventario.fecha.desc()).limit(200).all())
                 for m in movs:
                     filas_mov.append([
-                        m.lote.numero_lote if m.lote else "—", m.tipo,
+                        m.lote.numero_lote if m.lote else "—", formatear_estado(m.tipo),
                         f"{m.cantidad:.2f}", m.referencia or "—", str(m.fecha)[:16],
                     ])
 
@@ -328,11 +355,15 @@ class VistaDetalleProducto(QWidget):
                     str(d.orden.fecha), f"{d.cantidad:.2f}", f"S/ {d.subtotal:.2f}",
                 ])
 
-        # ── Breadcrumb secundario + header ──────────────────────
+        # ── Breadcrumb secundario (local, estático) ─────────────
+        # El breadcrumb del header (arriba de todo) se actualiza más
+        # abajo, tras fijar self._nombre_actual y posicionar la
+        # pestaña — así refleja también cuál pestaña interna quedó
+        # activa (ver _al_cambiar_pestana), en vez de fijarse solo una
+        # vez acá con un breadcrumb que quedaría incompleto hasta que
+        # el usuario cambiara de pestaña manualmente.
         self._migaja.establecer(["Inventario", "Productos", nombre])
-        ventana = self.window()
-        if hasattr(ventana, "actualizar_pestana_interna"):
-            ventana.actualizar_pestana_interna(nombre, migas_extra=["Productos", nombre])
+        self._nombre_actual = nombre
 
         # ── Encabezado + KPIs ────────────────────────────────────
         self._lbl_nombre.setText(nombre)
@@ -389,7 +420,15 @@ class VistaDetalleProducto(QWidget):
                 "sí sola."
             )
 
+        # setCurrentIndex(0) solo dispara currentChanged si el índice
+        # previo era distinto de 0 — si el detalle ya estaba en la
+        # pestaña "Información" (ej. se reabre otro producto sin haber
+        # cambiado de pestaña), Qt no emite la señal y el breadcrumb
+        # del header quedaría con el nombre del producto anterior. Por
+        # eso se llama también explícitamente, sin depender solo de la
+        # señal.
         self.notebook.setCurrentIndex(0)
+        self._al_cambiar_pestana(0)
 
     # ══════════════════════════════════════════════════════════
     #  Guardar Información

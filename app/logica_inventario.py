@@ -262,3 +262,48 @@ def actualizar_producto(db, producto_id: int, *, nombre: str = None,
         producto.descripcion = descripcion.strip()
     db.flush()
     return producto
+
+
+def lotes_con_stock_de_producto(db, producto_id: int) -> int:
+    """Cuenta cuántos lotes con existencia disponible tiene un producto
+    ahora mismo. Se usa para el "conteo real" del diálogo de
+    confirmación al desactivar un producto (Parte 5) — en vez de una
+    advertencia genérica ("¿seguro?"), el usuario ve el impacto real
+    ("tiene 3 lotes con stock") antes de decidir.
+    """
+    return (
+        db.query(LoteInventario)
+        .filter(
+            LoteInventario.producto_id == producto_id,
+            LoteInventario.estado == "DISPONIBLE",
+            LoteInventario.cantidad_disponible > 0,
+        )
+        .count()
+    )
+
+
+def desactivar_producto(db, producto_id: int) -> Producto:
+    """Desactiva (soft-delete) un producto: deja de aparecer en el
+    catálogo activo y en los selectores de nuevas órdenes/producción,
+    pero su historial (lotes, movimientos, ventas) se conserva intacto
+    — igual que desactivar_usuario() en logica_autenticacion.py.
+    """
+    producto = db.get(Producto, producto_id)
+    if producto is None:
+        raise ValueError(f"No existe el producto con id {producto_id}.")
+    if not producto.activo:
+        raise ValueError(f"El producto «{producto.nombre}» ya estaba desactivado.")
+    producto.activo = False
+    db.commit()
+    return producto
+
+
+def reactivar_producto(db, producto_id: int) -> Producto:
+    producto = db.get(Producto, producto_id)
+    if producto is None:
+        raise ValueError(f"No existe el producto con id {producto_id}.")
+    if producto.activo:
+        raise ValueError(f"El producto «{producto.nombre}» ya estaba activo.")
+    producto.activo = True
+    db.commit()
+    return producto
