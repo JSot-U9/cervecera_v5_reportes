@@ -23,6 +23,8 @@ usuario hace doble clic en un producto distinto.
 
 from __future__ import annotations
 
+from PySide6.QtCore import Qt
+from PySide6.QtGui import QShortcut, QKeySequence
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QLabel, QLineEdit,
     QPushButton, QTabWidget, QComboBox,
@@ -174,6 +176,15 @@ class VistaDetalleProducto(QWidget):
         fila_btn.addStretch()
         self.btn_guardar_info = QPushButton("💾  Guardar cambios")
         self.btn_guardar_info.clicked.connect(self._guardar_informacion)
+        # Ctrl+S (Parte 6): a diferencia de los diálogos modales del resto
+        # de la app, este botón vive en un widget embebido dentro de
+        # VistaInventario (no una ventana propia), así que el atajo usa
+        # WidgetWithChildrenShortcut: solo se activa cuando el foco está
+        # dentro de este detalle de producto, no en cualquier parte de
+        # Inventario mientras esta pestaña ni siquiera es la visible.
+        atajo_guardar = QShortcut(QKeySequence("Ctrl+S"), self)
+        atajo_guardar.setContext(Qt.WidgetWithChildrenShortcut)
+        atajo_guardar.activated.connect(self.btn_guardar_info.click)
         fila_btn.addWidget(self.btn_guardar_info)
         pl.addLayout(fila_btn)
 

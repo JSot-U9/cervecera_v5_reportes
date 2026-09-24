@@ -110,6 +110,7 @@ class VentanaPrincipal(QMainWindow):
         QShortcut(QKeySequence("F5"), self).activated.connect(self._refrescar_activo)
         QShortcut(QKeySequence("Ctrl+K"), self).activated.connect(
             lambda: self._header.enfocar_busqueda())
+        QShortcut(QKeySequence("Ctrl+N"), self).activated.connect(self._nuevo_en_modulo_activo)
 
         central = QWidget()
         self.setCentralWidget(central)
@@ -502,6 +503,21 @@ class VentanaPrincipal(QMainWindow):
         vista = self._vistas.get(self._clave_activa)
         if vista is not None and hasattr(vista, "refrescar"):
             vista.refrescar()
+
+    def _nuevo_en_modulo_activo(self):
+        """Ctrl+N: dispara la acción "crear nuevo <ítem principal>" del
+        módulo activo (orden de compra/producción/venta, producto,
+        usuario), la misma que el botón "＋" de ese módulo. Cada vista
+        solo expone accion_nuevo si el rol actual tiene permiso de
+        crear ahí (se fija junto al botón, con el mismo `if puede(...)`
+        — ver vista_compras.py, vista_inventario.py, etc.), así que acá
+        no hace falta repetir la validación: si el atajo no hace nada,
+        es porque ese módulo no tiene "nuevo" o el rol no puede crear.
+        """
+        vista = self._vistas.get(self._clave_activa)
+        accion = getattr(vista, "accion_nuevo", None)
+        if accion is not None:
+            accion()
 
     def _cerrar_sesion(self):
         cerrar_sesion()

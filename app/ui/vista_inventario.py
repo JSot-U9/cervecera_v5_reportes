@@ -4,6 +4,7 @@ Stock actual · Lotes FIFO · Movimientos · Catálogo de productos.
 """
 
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QShortcut, QKeySequence
 from PySide6.QtWidgets import (
     QWidget, QDialog, QVBoxLayout, QHBoxLayout, QGridLayout, QLabel,
     QLineEdit, QComboBox, QPushButton, QTabWidget, QStackedWidget, QMessageBox,
@@ -180,6 +181,7 @@ class VistaInventario(QWidget):
                                placeholder="🔎  Buscar en catálogo...")
         if puede_editar:
             barra.agregar_boton("＋  Nuevo producto", self._abrir_nuevo_producto)
+            self.accion_nuevo = self._abrir_nuevo_producto  # Ctrl+N global
             barra.agregar_boton("🗑  Desactivar", self._desactivar_producto, estilo="peligro")
         pl.addWidget(barra)
 
@@ -404,6 +406,7 @@ class VentanaAjusteStock(QDialog):
         fila_btn.addWidget(btn_cancelar)
         self.btn_guardar = QPushButton("💾  Guardar ajuste")
         self.btn_guardar.clicked.connect(self._guardar)
+        QShortcut(QKeySequence("Ctrl+S"), self).activated.connect(self.btn_guardar.click)
         fila_btn.addWidget(self.btn_guardar)
         cuerpo.addLayout(fila_btn)
 
@@ -501,6 +504,7 @@ class VentanaProducto(QDialog):
         fila_btn.addWidget(btn_cancelar)
         self.btn_guardar = QPushButton("💾  Registrar producto")
         self.btn_guardar.clicked.connect(self._guardar)
+        QShortcut(QKeySequence("Ctrl+S"), self).activated.connect(self.btn_guardar.click)
         fila_btn.addWidget(self.btn_guardar)
         cuerpo.addLayout(fila_btn)
 

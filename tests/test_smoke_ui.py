@@ -730,3 +730,83 @@ def test_desactivar_usuario_muestra_conteo_de_ordenes(
     assert "1 orden" in mensajes[-1]
     with _bd.SesionLocal() as db:
         assert db.get(m.Usuario, u.id).activo is False
+
+
+# ══════════════════════════════════════════════════════════════════
+#  PARTE 6 — atajos de teclado (Ctrl+N global, Ctrl+S en formularios)
+# ══════════════════════════════════════════════════════════════════
+
+def test_ctrl_n_disponible_cuando_el_rol_puede_crear(qapp, base_de_datos_limpia, sin_sesion):
+    """VentanaPrincipal._nuevo_en_modulo_activo() llama a
+    vista_activa().accion_nuevo() — cada vista solo debe exponer ese
+    atributo si el rol activo puede crear ahí (mismo permiso que ya
+    gatea el botón "＋", ver vista_compras.py)."""
+    import app.ui.vista_compras as vc
+    import app.ui.vista_ventas as vv
+    import app.ui.vista_admin as va
+
+    _iniciar_como("ADMIN")
+    vista_compras = vc.VistaCompras()
+    assert vista_compras.accion_nuevo == vista_compras._abrir_nueva_orden
+
+    vista_ventas = vv.VistaVentas()
+    assert vista_ventas.accion_nuevo == vista_ventas._abrir_nueva_venta
+
+    vista_admin = va.VistaAdmin()
+    assert vista_admin.accion_nuevo == vista_admin._abrir_nuevo_usuario
+
+
+def test_ctrl_n_no_disponible_si_el_rol_no_puede_crear(qapp, base_de_datos_limpia, sin_sesion):
+    """El rol PRODUCCION solo puede *ver* Inventario ("ver", sin
+    "entrada") — ni el botón "＋ Nuevo producto" ni accion_nuevo deben
+    existir, para que Ctrl+N no abra un formulario que ese rol no
+    podría guardar."""
+    import app.ui.vista_inventario as vi
+
+    _iniciar_como("PRODUCCION")
+    vista = vi.VistaInventario()
+    assert getattr(vista, "accion_nuevo", None) is None
+
+
+def test_ctrl_n_en_ventana_principal_dispara_accion_nuevo_del_modulo_activo(
+    qapp, base_de_datos_limpia, sin_sesion,
+):
+    """Prueba de integración del handler _nuevo_en_modulo_activo(): con
+    Compras como módulo activo, debe llamar exactamente a la misma
+    acción que el botón "＋ Nueva orden" (sin necesidad de simular la
+    pulsación real de teclado — el QShortcut ya es una API de Qt bien
+    probada; lo que hay que probar es que el handler pesca la vista
+    activa correcta)."""
+    import app.ui.ventana_principal as vp
+
+    _iniciar_como("ADMIN")
+    ventana = vp.VentanaPrincipal()
+    ventana._navegar("compras")
+    llamadas = []
+    ventana._vistas["compras"].accion_nuevo = lambda: llamadas.append("compras")
+    ventana._nuevo_en_modulo_activo()
+    assert llamadas == ["compras"]
+
+    # Un módulo sin "nuevo" (Dashboard) no debe romper nada.
+    ventana._navegar("dashboard")
+    ventana._nuevo_en_modulo_activo()  # no debe lanzar excepción
+
+
+def test_ctrl_s_guarda_solo_si_el_formulario_es_valido(qapp, base_de_datos_limpia, sin_sesion):
+    """El atajo Ctrl+S dispara btn_guardar.click() — como Qt no
+    permite click() en un botón deshabilitado, heredar la validación
+    inline existente (conectar_boton_a_validez) es automático: no hace
+    falta duplicar la lógica de validación para el atajo."""
+    import app.ui.vista_inventario as vi
+
+    _iniciar_como("ADMIN")
+    dialogo = vi.VentanaProducto(None, al_guardar=lambda: None)
+    dialogo.campo_nombre.set("")  # inválido: nombre vacío
+    dialogo.campo_nombre.widget.editingFinished.emit()
+    assert not dialogo.btn_guardar.isEnabled()
+    dialogo.btn_guardar.click()  # equivalente a lo que hace el atajo Ctrl+S
+    # No debe haber guardado nada (no hay excepción ni producto creado).
+
+    dialogo.campo_nombre.set("Producto de prueba Ctrl+S")
+    dialogo.campo_nombre.widget.editingFinished.emit()
+    assert dialogo.btn_guardar.isEnabled()

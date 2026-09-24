@@ -4,6 +4,7 @@ Registro de órdenes de venta + gestión de clientes.
 """
 
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QShortcut, QKeySequence
 from PySide6.QtWidgets import (
     QWidget, QDialog, QVBoxLayout, QHBoxLayout, QGridLayout, QLabel,
     QLineEdit, QComboBox, QPushButton, QTabWidget, QMessageBox,
@@ -60,6 +61,7 @@ class VistaVentas(QWidget):
         if puede_crear:
             self.tutorial_targets["btn_nueva_venta"] = barra.agregar_boton(
                 "＋  Nueva venta", self._abrir_nueva_venta)
+            self.accion_nuevo = self._abrir_nueva_venta  # Ctrl+N global
         self.tutorial_targets["btn_reporte"] = barra.agregar_boton(
             "📊  Reporte", self._abrir_dialogo_reporte, estilo="accionSecundaria")
         if "centro_inteligencia" in modulos_visibles(sesion_actual.rol):
@@ -239,6 +241,7 @@ class VentanaCliente(QDialog):
         fila_btn.addWidget(btn_cancelar)
         self.btn_guardar = QPushButton("💾  Guardar cliente")
         self.btn_guardar.clicked.connect(self._guardar)
+        QShortcut(QKeySequence("Ctrl+S"), self).activated.connect(self.btn_guardar.click)
         fila_btn.addWidget(self.btn_guardar)
         cuerpo.addLayout(fila_btn)
 
@@ -402,6 +405,7 @@ class VentanaNuevaVenta(QDialog):
         fila_btn.addWidget(btn_cancelar)
         self.btn_guardar = QPushButton("💰  Registrar venta")
         self.btn_guardar.clicked.connect(self._guardar_venta)
+        QShortcut(QKeySequence("Ctrl+S"), self).activated.connect(self.btn_guardar.click)
         fila_btn.addWidget(self.btn_guardar)
         cuerpo.addLayout(fila_btn)
 

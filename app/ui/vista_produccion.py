@@ -6,6 +6,7 @@ Planificación, seguimiento y cierre de órdenes de elaboración de cerveza.
 from datetime import date
 
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QShortcut, QKeySequence
 from PySide6.QtWidgets import (
     QWidget, QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QComboBox,
     QPushButton, QMessageBox,
@@ -66,6 +67,11 @@ class VistaProduccion(QWidget):
         if puede_crear:
             self.tutorial_targets["btn_nueva_orden"] = barra.agregar_boton(
                 "＋  Nueva orden", self._abrir_nueva_orden)
+            # Ctrl+N (global, ver ventana_principal.py): VentanaPrincipal
+            # llama a vista_activa().accion_nuevo() si existe. Solo se fija
+            # cuando el rol puede crear — mismo permiso que ya gatea el
+            # botón, así el atajo nunca hace algo que el botón no permitiría.
+            self.accion_nuevo = self._abrir_nueva_orden
         if puede_iniciar:
             self.tutorial_targets["btn_iniciar"] = barra.agregar_boton(
                 "▶  Iniciar", self._iniciar, estilo="accionSecundaria")
@@ -262,6 +268,7 @@ class VentanaNuevaOrdenProduccion(QDialog):
         fila_btn.addWidget(btn_cancelar)
         self.btn_guardar = QPushButton("🍺  Crear orden")
         self.btn_guardar.clicked.connect(self._guardar)
+        QShortcut(QKeySequence("Ctrl+S"), self).activated.connect(self.btn_guardar.click)
         fila_btn.addWidget(self.btn_guardar)
         cuerpo.addLayout(fila_btn)
 
@@ -432,6 +439,7 @@ class VentanaCerrarOrden(QDialog):
         fila_btn.addWidget(btn_cancelar)
         self.btn_guardar = QPushButton("✔  Cerrar y costear orden")
         self.btn_guardar.clicked.connect(self._guardar)
+        QShortcut(QKeySequence("Ctrl+S"), self).activated.connect(self.btn_guardar.click)
         fila_btn.addWidget(self.btn_guardar)
         cuerpo.addLayout(fila_btn)
 

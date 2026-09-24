@@ -7,7 +7,10 @@ Se puede abrir tanto desde la pantalla de inicio de sesión como desde el
 menú lateral de la ventana principal.
 """
 
+from pathlib import Path
+
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QFrame,
 )
@@ -48,7 +51,12 @@ class DialogoCreditos(QDialog):
         flayout.setSpacing(0)
         
         lbl_logo = QLabel()
-        lbl_logo.setPixmap(cargar_logo("chico"))
+        # Usar el logo de la universidad en lugar del logo de la empresa
+        ruta_uac = Path(__file__).resolve().parent / "assets" / "UAC_logo.png"
+        pix = QPixmap(str(ruta_uac))
+        if not pix.isNull():
+            pix = pix.scaled(160, 120, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            lbl_logo.setPixmap(pix)
         lbl_logo.setAlignment(Qt.AlignCenter)
         flayout.addWidget(lbl_logo)
         layout.addWidget(franja)

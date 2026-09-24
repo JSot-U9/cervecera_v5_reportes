@@ -13,6 +13,7 @@ import datetime
 from pathlib import Path
 
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QShortcut, QKeySequence
 from PySide6.QtWidgets import (
     QDialog, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QComboBox,
     QRadioButton, QButtonGroup, QPushButton, QMessageBox, QFileDialog,
@@ -146,6 +147,11 @@ class DialogoReporte(QDialog):
         self.btn_guardar = QPushButton("💾  Guardar como…")
         self.btn_guardar.setEnabled(False)
         self.btn_guardar.clicked.connect(self._guardar)
+        # Ctrl+S: mismo efecto que hacer clic en "Guardar como…" (Parte 6).
+        # .click() respeta el estado habilitado/deshabilitado del botón,
+        # así que si el formulario todavía no es válido, Ctrl+S tampoco
+        # hace nada — igual que clickear el botón a mano.
+        QShortcut(QKeySequence("Ctrl+S"), self).activated.connect(self.btn_guardar.click)
         panel_opts.addWidget(self.btn_guardar)
         panel_opts.addStretch()
 

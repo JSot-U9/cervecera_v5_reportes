@@ -4,6 +4,7 @@ Cuentas de usuario · Configuración de la empresa · Registros de acceso.
 """
 
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QShortcut, QKeySequence
 from PySide6.QtWidgets import (
     QWidget, QDialog, QVBoxLayout, QHBoxLayout, QGridLayout, QLabel,
     QLineEdit, QComboBox, QPushButton, QTabWidget, QMessageBox, QScrollArea,
@@ -67,6 +68,7 @@ class VistaAdmin(QWidget):
         barra = BarraBusqueda(al_escribir=lambda t: self.tabla_usuarios.filtrar(t),
                                placeholder="🔎  Buscar usuario...")
         barra.agregar_boton("＋  Nuevo usuario", self._abrir_nuevo_usuario)
+        self.accion_nuevo = self._abrir_nuevo_usuario  # Ctrl+N global
         barra.agregar_boton("✓  Reactivar", self._reactivar, estilo="exito")
         barra.agregar_boton("✗  Desactivar", self._desactivar, estilo="peligro")
         pl.addWidget(barra)
@@ -383,6 +385,7 @@ class VentanaNuevoUsuario(QDialog):
         fila_btn.addWidget(btn_cancelar)
         self.btn_guardar = QPushButton("💾  Crear usuario")
         self.btn_guardar.clicked.connect(self._guardar)
+        QShortcut(QKeySequence("Ctrl+S"), self).activated.connect(self.btn_guardar.click)
         fila_btn.addWidget(self.btn_guardar)
         cuerpo.addLayout(fila_btn)
 

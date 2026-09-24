@@ -6,6 +6,7 @@
 from datetime import datetime
 
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QShortcut, QKeySequence
 from PySide6.QtWidgets import (
     QWidget, QDialog, QVBoxLayout, QHBoxLayout, QGridLayout, QLabel,
     QLineEdit, QComboBox, QPushButton, QTabWidget, QMessageBox,
@@ -82,6 +83,7 @@ class VistaCompras(QWidget):
         if puede_crear:
             self.tutorial_targets["btn_nueva_orden"] = barra.agregar_boton(
                 "＋  Nueva orden", self._abrir_nueva_orden)
+            self.accion_nuevo = self._abrir_nueva_orden  # Ctrl+N global
         self.tutorial_targets["btn_reporte"] = barra.agregar_boton(
             "📊  Reporte", self._abrir_dialogo_reporte, estilo="accionSecundaria")
         if "centro_inteligencia" in modulos_visibles(sesion_actual.rol):
@@ -278,6 +280,7 @@ class VentanaProveedor(QDialog):
         fila_btn.addWidget(btn_cancelar)
         self.btn_guardar = QPushButton("💾  Guardar proveedor")
         self.btn_guardar.clicked.connect(self._guardar)
+        QShortcut(QKeySequence("Ctrl+S"), self).activated.connect(self.btn_guardar.click)
         fila_btn.addWidget(self.btn_guardar)
         cuerpo.addLayout(fila_btn)
 
@@ -551,6 +554,7 @@ class VentanaNuevaOrden(QDialog):
         fila_btn.addWidget(btn_cancelar)
         self.btn_guardar = QPushButton("💾  Guardar orden de compra")
         self.btn_guardar.clicked.connect(self._guardar_orden)
+        QShortcut(QKeySequence("Ctrl+S"), self).activated.connect(self.btn_guardar.click)
         fila_btn.addWidget(self.btn_guardar)
         cuerpo.addLayout(fila_btn)
 
